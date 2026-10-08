@@ -1,0 +1,13 @@
+.DS_Store
+Thumbs.db
+.env
+.env.*
+*.log
+*.zip
+node_modules/
+.venv/
+__pycache__/
+*会话*/
+*采集*/
+*验证记录*/
+*.local.json

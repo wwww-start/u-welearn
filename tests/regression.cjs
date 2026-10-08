@@ -1,0 +1,15 @@
+const assert=require('node:assert/strict');
+const tools=require('../modules/answer-tools.js');
+const q=[{type:'fill',inputs:[{},{}]}];
+assert.equal(tools.bind(q,[{answers:['color','colour']},{answers:['cloth']}]).ok,true);
+assert.deepEqual(q[0].answer,['color','cloth']);
+assert.deepEqual(q[0].answerAlternatives,[['color','colour'],['cloth']]);
+const untouched=[{type:'fill',inputs:[{},{}],answer:null}];
+assert.equal(tools.bind(untouched,[{answers:['only one']}]).ok,false);
+assert.equal(untouched[0].answer,null);
+const multiple=[{type:'multiple'}];tools.bind(multiple,[{answers:['A','C']}]);assert.deepEqual(multiple[0].answer,['A','C']);
+assert.deepEqual(tools.stats([{type:'fill',inputs:[1,2,3],answered:true}],0),{questionCount:1,blankCount:3,answeredCount:1,answeredBlankCount:3,submittedCount:0});
+const seq={items:[{label:'A',text:'first'},{label:'B',text:'second'}],slots:[{},{}]};
+assert.equal(tools.sequence(seq,['A','A']),null);
+assert.deepEqual(tools.sequence(seq,['B','A']).map(x=>x.label),['B','A']);
+console.log('PASS: blank alternatives, strict mapping, multi-select, counts and sequence validation');
