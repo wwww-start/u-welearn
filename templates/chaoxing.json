@@ -1,0 +1,105 @@
+{
+  "siteId": "chaoxing",
+  "siteName": "学习通 (超星)",
+  "urlPatterns": [
+    "*://*.chaoxing.com/*",
+    "*://*.xuexitong.com/*"
+  ],
+  "urlRegex": "^https?://([^/]*\\.)?(chaoxing|xuexitong)\\.com/",
+  "version": "1.0.0",
+  "createdAt": "2026-10-25",
+  "lastUpdated": "2026-10-25",
+  "description": "超星学习通：作业/测验/考试统一为 fanyaMarking 体系；题干文字经自定义字体加密，需走截图视觉路径；视频页需 MAIN world 事件守卫配合。",
+  "selectors": {
+    "questionContainer": ".fanyaMarking, .TiMu",
+    "questionItem": ".questionLi",
+    "questionTypes": {
+      "detectByAttribute": false,
+      "title": ".mark_name",
+      "typeHint": ".mark_name .colorShallow",
+      "stem": ".mark_name .qtContent",
+      "stemImage": ".mark_name .qtContent img",
+      "single_choice": {
+        "container": ".questionLi",
+        "options": ".mark_letter li[role=\"option\"]",
+        "optionLabel": "li",
+        "clickTarget": "li[role=\"option\"]"
+      },
+      "multiple": {
+        "container": ".questionLi",
+        "options": ".mark_letter li[role=\"option\"]",
+        "clickTarget": "li[role=\"option\"]"
+      },
+      "judge": {
+        "container": ".questionLi",
+        "options": ".mark_letter li[role=\"option\"]",
+        "clickTarget": "li[role=\"option\"]"
+      },
+      "fill_blank": {
+        "container": ".questionLi",
+        "inputs": "textarea, input[type=\"text\"], .ans-input",
+        "editable": "[contenteditable=\"true\"]"
+      },
+      "short_answer": {
+        "container": ".questionLi",
+        "inputs": "textarea, [contenteditable=\"true\"]"
+      }
+    },
+    "answerReadback": {
+      "mine": ".stuAnswerContent",
+      "right": ".rightAnswerContent",
+      "score": ".mark_score",
+      "judge": ".mark_judge_name",
+      "wrongMark": ".marking_cuo",
+      "rightMark": ".marking_dui"
+    },
+    "submit": {
+      "confirmOk": "#popok",
+      "confirmCancel": "#popno",
+      "submitButtonText": "提交|交卷|保存并提交"
+    },
+    "video": {
+      "playerPath": "/ananas/modules/video/index.html",
+      "element": "video",
+      "taskTabs": "ul.prev_ul li[onclick*=\"changeDisplayContent\"]",
+      "catalogNodes": ".posCatalog_select:not(.firstLayer), .posCatalog_name",
+      "cardsFrame": "#iframe"
+    }
+  },
+  "features": {
+    "hasQuestionIndex": true,
+    "hasTypeAttribute": false,
+    "inputsHidden": false,
+    "needClickWrapper": true,
+    "autoScrollSupport": true,
+    "isSPA": false,
+    "useIframe": true,
+    "iframeDomain": "mooc1.chaoxing.com",
+    "answerSource": "none",
+    "tabbedContent": true,
+    "fontObfuscated": true,
+    "requiresScreenshot": true,
+    "hasVideoGuard": true,
+    "hasBuiltInAI": true,
+    "examTimeLimited": true,
+    "noBackJump": true,
+    "possibleFaceCheck": true
+  },
+  "notes": "正确答案仅在教师开放后可见；作答态三成嵌套（studentstudy → knowledge/cards → ananas/modules/work 或 video）。题干与选项文字使用自定义字体映射（DOM 为 寙寑寗线 类乱码），因此取答案必须走截图 + 视觉模型，或对纯文本题使用扩展自带模型。刷视频依赖 world:MAIN 的 HTMLMediaElement 原型守卫。",
+  "modules": {
+    "pageModel": "modules/xuexitong-page-model.js",
+    "ai": "modules/xuexitong-ai.js",
+    "video": "modules/xuexitong-video.js",
+    "videoGuard": "modules/xuexitong-video-guard.js",
+    "answer": "modules/xuexitong-answer.js",
+    "exam": "modules/xuexitong-exam.js",
+    "cozeHook": "modules/xuexitong-coze-hook.js",
+    "entry": "modules/xuexitong-entry.js"
+  },
+  "knownIssues": [
+    "章节练习提交后不返回标准答案，接口仅含 我的答案/得分/对错标记",
+    "enc 有多个变体：Vue 版、studentstudy 专用、作业模块、单作业独立，互不通用",
+    "进入 studentstudy 必须经 /mycourse/transfer?refer= 中转，否则 enc 校验失败",
+    "考试可能存在单题限时与分卷禁回跳，自动作答需按题就地完成"
+  ]
+}

@@ -54,9 +54,23 @@ const BUILTIN_MODEL = {
   builtin: false,
 };
 
+// 额外内置预设（与 BUILTIN_MODEL 并存，API Key 同样留空待填）
+const PRESET_MODELS = [
+  {
+    id: "builtin-deepseek-v41-flash",
+    name: "DeepSeek V4.1 Flash",
+    baseUrl: "https://api.deepseek.com",
+    apiKey: "",
+    model: "deepseek-flash",
+    builtin: true,
+  },
+];
+
+
 // Initialize
 document.addEventListener("DOMContentLoaded", async () => {
   await initModels();
+  initCXPanel();
   const prefs=await chrome.storage.sync.get(["skipUnfinished","autoContinue"]);
   skipToggle.checked=!!prefs.skipUnfinished;
   autoContinueToggle.checked=prefs.autoContinue!==false;
@@ -169,6 +183,7 @@ async function initModels() {
 async function getAllModels() {
   const data = await chrome.storage.sync.get(["aiModels"]);
   const models = new Map([[BUILTIN_MODEL.id, { ...BUILTIN_MODEL }]]);
+  for (const preset of PRESET_MODELS) models.set(preset.id, { ...preset });
   for (const saved of data.aiModels || []) models.set(saved.id, saved);
   return [...models.values()];
 }
@@ -202,13 +217,13 @@ async function renderModelList() {
         <div class="model-meta">${model.model}</div>
       </div>
       <div class="model-actions">
+        <button class="icon-btn edit-model-btn" data-model-id="${model.id}" title="编辑并填写密钥">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+        </button>
         ${
           !model.builtin
             ? `
-          <button class="icon-btn edit-model-btn" data-model-id="${model.id}">
-            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-          </button>
-          <button class="icon-btn delete-model-btn" data-model-id="${model.id}">
+          <button class="icon-btn delete-model-btn" data-model-id="${model.id}" title="删除">
             <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
           </button>
         `
@@ -443,17 +458,74 @@ async function injectContentScript(tabId) {
   }
 }
 
+// Route the shared button without changing platform controllers.
+let runningAnswerTarget = null;
+let answerDispatchPending = false;
+function sendAnswerMessage(tabId, action, extra = {}) {
+  return new Promise(resolve => {
+    chrome.tabs.sendMessage(tabId, {action, ...extra}, response => {
+      if (chrome.runtime.lastError) return resolve(null);
+      resolve(response);
+    });
+  });
+}
+async function routeCXAnswer(tab) {
+  const status = await sendAnswerMessage(tab.id, 'cxStatus');
+  if (!status?.success) return false;
+  const scan = await sendAnswerMessage(tab.id, 'cxScan');
+  if (!scan?.success || !scan.data?.count) {
+    addLog('warning', '学习通：当前页面未检测到题目，请打开具体作业或练习页面后重试。');
+    return true;
+  }
+  const action = status.data?.pageType === 'exam' ? 'cxStartExam' : 'cxStartAnswer';
+  runningAnswerTarget = {tabId: tab.id, platform: 'cx'};
+  setRunningState(true);
+  addLog('info', '学习通：开始处理当前页 ' + scan.data.count + ' 道题；完成后请核对并手动提交。');
+  try {
+    const result = await sendAnswerMessage(tab.id, action, {options: {}});
+    if (!result?.success) {
+      addLog('error', '学习通：' + (result?.error || '页面连接中断，请刷新后重试'));
+    } else {
+      const stats = result.data?.stats || {};
+      questionCount.textContent = stats.total ?? scan.data.count;
+      answeredCount.textContent = stats.answered ?? 0;
+      questionCount.parentElement.querySelector('.stat-label').textContent = '识别题目';
+      answeredCount.parentElement.querySelector('.stat-label').textContent = '已填写题目';
+      document.getElementById('submittedSummary').textContent = '学习通：待核对，未自动提交';
+      addLog('info', '学习通：已填写 ' + (stats.answered || 0) + '，失败 ' + (stats.failed || 0) + '。请核对页面结果。');
+    }
+  } catch (error) {
+    addLog('error', '学习通：' + error.message);
+  } finally {
+    if (runningAnswerTarget?.tabId === tab.id) runningAnswerTarget = null;
+    setRunningState(false);
+  }
+  return true;
+}
+
 // 自动答题（一键：扫描 + 答题）
 startBtn.addEventListener("click", async () => {
   if (isRunning) {
     // 暂停
     setRunningState(false);
     addLog("warning", "已暂停答题");
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tabs[0]) {
-      chrome.tabs.sendMessage(tabs[0].id, { action: "stop" });
-    }
+    const target = runningAnswerTarget;
+    const tabs = target ? [] : await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabId = target?.tabId ?? tabs[0]?.id;
+    if (tabId != null) await sendAnswerMessage(tabId, target?.platform === 'cx' ? 'cxStop' : 'stop');
     return;
+  }
+
+  if (answerDispatchPending) return;
+  answerDispatchPending = true;
+  try {
+    const currentTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (currentTabs[0] && await routeCXAnswer(currentTabs[0])) return;
+  } catch (error) {
+    addLog('error', '页面识别失败：' + error.message);
+    return;
+  } finally {
+    answerDispatchPending = false;
   }
 
   const activeModel = await getActiveModel();
@@ -491,6 +563,7 @@ startBtn.addEventListener("click", async () => {
     return;
   }
 
+  runningAnswerTarget = {tabId: tab.id, platform: 'default'};
   setRunningState(true);
   addLog("info", "🚀 开始自动答题");
   chrome.tabs.sendMessage(
@@ -594,5 +667,205 @@ chrome.runtime.onMessage.addListener((message) => {
       updateStatus("error", "错误");
       addLog("error", message.text);
       break;
+  }
+});
+
+/* ============================================================
+ * 学习通面板
+ * ============================================================ */
+
+let cxTabId = null;
+
+function cxSend(action, extra) {
+  return new Promise((resolve) => {
+    if (cxTabId == null) return resolve(null);
+    chrome.tabs.sendMessage(cxTabId, { action, ...(extra || {}) }, (r) => {
+      if (chrome.runtime.lastError) return resolve(null);
+      resolve(r);
+    });
+  });
+}
+
+// 学习通模块清单（与 manifest.json 中第三组保持一致）
+const CX_SCRIPTS = [
+  "modules/xuexitong-page-model.js",
+  "modules/xuexitong-ai.js",
+  "modules/xuexitong-video.js",
+  "modules/xuexitong-answer.js",
+  "modules/xuexitong-exam.js",
+  "modules/xuexitong-entry.js",
+];
+
+// 重新加载扩展后，已打开的标签页不会自动注入 content script，
+// 这里按需补注入一次，避免用户必须手动刷新。
+async function ensureCXInjected(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: CX_SCRIPTS,
+    });
+    return true;
+  } catch (e) {
+    console.warn("[学习通] 补注入失败：", e.message);
+    return false;
+  }
+}
+
+async function initCXPanel() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  if (!tab || tab.id == null) return;
+
+  cxTabId = tab.id;
+
+  // 不依赖 tab.url：本扩展未申请 "tabs" 权限时 url 可能为空。
+  // 先探测 content script，不通就补注入一次，再探测。
+  let probe = await cxSend("cxStatus");
+  if (!probe || !probe.success) {
+    const injected = await ensureCXInjected(tab.id);
+    if (injected) probe = await cxSend("cxStatus");
+  }
+  if (!probe || !probe.success) {
+    cxTabId = null;
+    console.warn("[学习通] content script 未响应：确认当前标签是学习通页面");
+    return;
+  }
+
+  const panel = document.getElementById("cxPanel");
+  if (!panel) return;
+  panel.style.display = "block";
+
+  const pageTypeEl = document.getElementById("cxPageType");
+  const infoEl = document.getElementById("cxInfo");
+
+  const PAGE_LABEL = {
+    video: "播放器页",
+    study: "学习页",
+    work: "作业作答页",
+    "work-list": "作业列表",
+    exam: "考试页",
+    "paper-review": "试卷回顾",
+    other: "其他页面",
+  };
+
+  async function refresh() {
+    const res = await cxSend("cxStatus");
+    if (!res || !res.success) {
+      if (pageTypeEl) pageTypeEl.textContent = "未连接（刷新页面后重试）";
+      return;
+    }
+    const d = res.data;
+    if (pageTypeEl) pageTypeEl.textContent = PAGE_LABEL[d.pageType] || d.pageType;
+
+    const lines = [];
+    lines.push("课程 " + (d.params.courseId || "-") + " · 班级 " + (d.params.clazzId || "-"));
+    if (d.video) {
+      if (d.video.video) {
+        const v = d.video.video;
+        lines.push(
+          "视频 " + v.currentTime + "s / " + v.duration + "s · " +
+          v.rate + "x" + (v.paused ? " · 已暂停" : "")
+        );
+      } else {
+        lines.push("视频：未检测到 video 元素");
+      }
+      lines.push("播放器守卫：" + (d.globalGuard ? "已生效" : "未生效"));
+    }
+    if (d.answer && d.answer.stats && d.answer.stats.total) {
+      lines.push("答题：" + d.answer.stats.answered + "/" + d.answer.stats.total +
+        (d.answer.running ? " 运行中" : ""));
+    }
+    if (d.exam && d.exam.remaining != null) {
+      lines.push("考试剩余：" + d.exam.remaining + "s" + (d.exam.alert ? " · " + d.exam.alert : ""));
+    }
+    if (infoEl) infoEl.innerHTML = lines.map((l) => "<div>" + l + "</div>").join("");
+  }
+
+  function videoOptions() {
+    const rate = parseFloat(document.getElementById("cxRate")?.value || "2");
+    return {
+      rate,
+      seekToLast: !!document.getElementById("cxSeekTail")?.checked,
+      autoNext: !!document.getElementById("cxAutoNext")?.checked,
+    };
+  }
+
+  document.getElementById("cxRefresh")?.addEventListener("click", refresh);
+
+  document.getElementById("cxVideoBtn")?.addEventListener("click", async () => {
+    const r = await cxSend("cxStartVideo", { options: videoOptions() });
+    addLog(r?.success ? "info" : "error",
+      r?.success ? "学习通：刷视频已启动（" + videoOptions().rate + "x）" : "学习通：刷视频启动失败");
+    refresh();
+  });
+
+  document.getElementById("cxAnswerBtn")?.addEventListener("click", async () => {
+    addLog("info", "学习通：开始答题…");
+    const r = await cxSend("cxStartAnswer", { options: {} });
+    if (r?.success) {
+      const s = r.data.stats || {};
+      addLog("info", "学习通答题完成：已答 " + (s.answered || 0) + "，失败 " + (s.failed || 0));
+    } else {
+      addLog("error", "学习通：答题未启动（页面类型可能不匹配）");
+    }
+    refresh();
+  });
+
+  document.getElementById("cxExamBtn")?.addEventListener("click", async () => {
+    addLog("info", "学习通：开始考试作答…");
+    const r = await cxSend("cxStartExam", { options: {} });
+    if (r?.success) {
+      const s = r.data.stats || {};
+      addLog("info", "学习通考试：已答 " + (s.answered || 0) + "，失败 " + (s.failed || 0));
+    } else {
+      addLog("error", "学习通：考试作答未启动");
+    }
+    refresh();
+  });
+
+  document.getElementById("cxStopBtn")?.addEventListener("click", async () => {
+    await cxSend("cxStop");
+    addLog("info", "学习通：已发送停止指令");
+    refresh();
+  });
+
+  await refresh();
+  setInterval(refresh, 3000);
+}
+/* ---- 学习通：核对 / 手动提交 ---- */
+
+document.getElementById("cxVerifyBtn")?.addEventListener("click", async () => {
+  const r = await cxSend("cxVerify");
+  if (!r || !r.success) {
+    addLog("error", "学习通：核对失败（页面未就绪）");
+    return;
+  }
+  const d = r.data;
+  if (d.unansweredCount === 0) {
+    addLog("success", `学习通：共 ${d.total} 题，全部已作答`);
+  } else {
+    addLog("warning", `学习通：共 ${d.total} 题，还有 ${d.unansweredCount} 题未作答`);
+    d.unanswered.slice(0, 8).forEach((q) => {
+      addLog("warning", `  未答 #${q.index ?? q.seq + 1} [${q.type}] ${q.stem}`);
+    });
+  }
+});
+
+document.getElementById("cxSubmitBtn")?.addEventListener("click", async () => {
+  const r = await cxSend("cxVerify");
+  let tip = "";
+  if (r?.success) {
+    tip = r.data.unansweredCount > 0
+      ? `还有 ${r.data.unansweredCount} 题未作答。`
+      : `共 ${r.data.total} 题已全部作答。`;
+  }
+  if (!confirm(`确认提交？\n\n${tip}\n\n提交后通常无法修改。`)) return;
+
+  addLog("info", "学习通：正在提交…");
+  const res = await cxSend("cxSubmit");
+  if (res?.success && res.data?.submitted) {
+    addLog("success", "学习通：已提交，请在页面上确认结果");
+  } else {
+    addLog("error", "学习通：提交未成功（可能没找到提交按钮，请在页面上手动提交）");
   }
 });

@@ -16,7 +16,7 @@
         <span class="title">AI Answer Bot</span>
         <div class="status-badge" id="statusBadge">
           <span class="status-dot" id="statusDot"></span>
-          <span class="status-text" id="statusText">等待开始</span>
+          <span class="status-text" id="statusText" aria-live="polite">等待开始</span>
         </div>
       </div>
       <div class="header-actions">
@@ -31,6 +31,53 @@
 
     <!-- 主内容区域 -->
     <main class="app-content">
+      <!-- 学习通专属面板（检测到 chaoxing / xuexitong 时显示） -->
+      <div id="cxPanel" style="display:none;margin-bottom:12px">
+        <div class="section-header" style="margin-bottom:8px">
+          <span>学习通 · <span id="cxPageType">-</span></span>
+          <button class="btn-text" id="cxRefresh">刷新</button>
+        </div>
+
+        <div class="action-row" style="display:flex;flex-wrap:wrap;gap:6px">
+          <button class="btn btn-primary" id="cxVideoBtn" style="flex:1 1 46%">刷视频</button>
+          <button class="btn btn-primary" id="cxAnswerBtn" style="flex:1 1 46%">答题</button>
+          <button class="btn btn-outline" id="cxExamBtn" style="flex:1 1 46%">考试作答</button>
+          <button class="btn btn-outline" id="cxStopBtn" style="flex:1 1 46%">停止</button>
+        </div>
+
+        <div class="action-row" style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-outline" id="cxVerifyBtn" style="flex:1">核对未作答</button>
+          <button class="btn btn-primary" id="cxSubmitBtn" style="flex:1;background:#c0392b">确认提交</button>
+        </div>
+        <div style="font-size:11px;color:#c0392b;margin:6px 4px;line-height:1.5">
+          ⚠ 默认<b>不会自动提交</b>。作答完成后请先核对，再点「确认提交」。
+        </div>
+
+        <label style="display:flex;align-items:center;gap:8px;margin:10px 4px;font-size:12px;color:#555">
+          倍速
+          <select id="cxRate" style="flex:1;padding:4px 6px;border-radius:6px;border:1px solid #ccd">
+            <option value="1">1.0x</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2" selected>2.0x</option>
+            <option value="2.5">2.5x</option>
+            <option value="3">3.0x</option>
+            <option value="4">4.0x</option>
+          </select>
+        </label>
+
+        <label style="display:flex;align-items:center;gap:8px;margin:6px 4px;font-size:12px;color:#555">
+          <input id="cxSeekTail" type="checkbox">
+          跳到最后一段（快速完成）
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;margin:6px 4px;font-size:12px;color:#555">
+          <input id="cxAutoNext" type="checkbox" checked>
+          播完自动切下一任务点
+        </label>
+
+        <div id="cxInfo" style="font-size:12px;color:#60758d;margin:8px 4px;line-height:1.6"></div>
+      </div>
+
       <!-- 统计卡片 -->
       <div class="stats-grid">
         <div class="stat-card">
@@ -44,9 +91,9 @@
       </div>
       <div id="submittedSummary" style="font-size:12px;color:#60758d;margin:8px">已确认提交 0 组</div>
 
-      <div class="skip-summary">已跳过 <strong id="skippedCount">0</strong> 页 · 跳过不计为完成</div>
+      <div class="skip-summary platform-course-controls">已跳过 <strong id="skippedCount">0</strong> 页 · 跳过不计为完成</div>
       <!-- 操作区 -->
-      <div class="steps-area">
+      <div class="steps-area platform-course-controls">
         <div class="action-row">
           <button class="btn btn-primary btn-lg" id="startBtn">
             <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -59,10 +106,18 @@
         </label>
       </div>
 
-      <label class="glass-switch-row">
+      <label class="glass-switch-row platform-course-controls">
         <span><strong>一键跳过</strong><small>无法完成的页面记录后继续；两站共用</small></span>
         <input id="skipUnfinished" type="checkbox" role="switch" aria-label="一键跳过未完成页面">
       </label>
+      <details class="usage-help">
+        <summary>使用提示</summary>
+        <div>
+          <p>先在右上角配置模型，再打开具体课件页面开始操作。</p>
+          <p>已填写、已提交和答对是不同状态；跳过的页面需要单独检查。</p>
+          <p>学习通请先核对内容，再确认提交。API 密钥仅在本机设置中填写。</p>
+        </div>
+      </details>
       <!-- 简要日志区域 -->
       <div class="log-section">
         <div class="section-header">
@@ -84,7 +139,7 @@
       <div class="modal-content">
         <div class="modal-header">
           <h3>AI模型管理</h3>
-          <button class="icon-btn" id="closeSettingsBtn">
+          <button class="icon-btn" id="closeSettingsBtn" aria-label="关闭模型管理">
             <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
@@ -106,7 +161,7 @@
       <div class="modal-content">
         <div class="modal-header">
           <h3 id="editModalTitle">添加模型</h3>
-          <button class="icon-btn" id="closeEditBtn">
+          <button class="icon-btn" id="closeEditBtn" aria-label="关闭模型编辑">
             <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
@@ -123,7 +178,7 @@
             <label for="editApiKey">API Key</label>
             <div class="input-wrapper">
               <input type="password" id="editApiKey" placeholder="sk-...">
-              <button class="toggle-visibility" id="toggleEditApiKey">
+              <button class="toggle-visibility" id="toggleEditApiKey" aria-label="显示或隐藏密钥">
                 <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
               </button>
             </div>
@@ -142,5 +197,7 @@
 
   </div>
   <script src="popup.js"></script>
+  <script src="platform-ui.js"></script>
+  <script src="liquid-glass.js"></script>
 </body>
 </html>

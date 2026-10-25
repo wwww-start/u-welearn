@@ -8,7 +8,7 @@
     constructor() {
       this.STORAGE_KEY = "siteTemplates";
       this.STATS_KEY = "templateStats";
-      this.ALLOWED_SITE_IDS = new Set(["unipus", "welearn"]);
+      this.ALLOWED_SITE_IDS = new Set(["unipus", "welearn", "chaoxing"]);
       this.builtInTemplates = [];
     }
 
@@ -49,6 +49,14 @@
           this.builtInTemplates.push(welearnTemplate);
           window.siteMatcher.registerTemplate(welearnTemplate);
           console.log('[TemplateManager] 内置模板加载成功: WE Learn');
+        }
+
+        // 加载学习通（超星）模板
+        const chaoxingTemplate = await this._fetchTemplate('/templates/chaoxing.json');
+        if (chaoxingTemplate) {
+          this.builtInTemplates.push(chaoxingTemplate);
+          window.siteMatcher.registerTemplate(chaoxingTemplate);
+          console.log('[TemplateManager] 内置模板加载成功: 学习通');
         }
       } catch (error) {
         console.error("[TemplateManager] 加载内置模板失败:", error);
@@ -101,7 +109,7 @@
         throw new Error("模板必须包含 siteId");
       }
       if (!this.ALLOWED_SITE_IDS.has(template.siteId)) {
-        throw new Error("仅支持 U校园和 WE Learn 模板");
+        throw new Error("仅支持 U校园、WE Learn 与 学习通 模板");
       }
 
       try {

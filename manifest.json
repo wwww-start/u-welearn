@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AI自动答题助手",
-  "version": "1.4.2",
-  "description": "题目识别、多选与听力处理、学习时长辅助",
+  "version": "1.5.0",
+  "description": "题目识别、多选与听力处理、学习时长辅助、学习通刷课与答题",
   "permissions": [
     "activeTab",
     "storage",
@@ -65,6 +65,44 @@
       "js": [
         "modules/unipus-auto-player.js"
       ]
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "all_frames": false,
+      "run_at": "document_idle",
+      "js": [
+        "modules/xuexitong-page-model.js",
+        "modules/xuexitong-legacy.js",
+        "modules/xuexitong-ai.js",
+        "modules/xuexitong-video.js",
+        "modules/xuexitong-answer.js",
+        "modules/xuexitong-exam.js",
+        "modules/xuexitong-entry.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://*.chaoxing.com/ananas/modules/video/*",
+        "https://*.xuexitong.com/ananas/modules/video/*"
+      ],
+      "all_frames": true,
+      "run_at": "document_start",
+      "world": "MAIN",
+      "js": [
+        "modules/xuexitong-video-guard.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://stat2-ans.chaoxing.com/*"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle",
+      "js": [
+        "modules/xuexitong-coze-hook.js"
+      ]
     }
   ],
   "web_accessible_resources": [
@@ -78,7 +116,18 @@
         "https://ucloud.unipus.cn/*",
         "https://ipub.unipus.cn/*",
         "https://welearn.sflep.com/*",
-        "https://centercourseware.sflep.com/*"
+        "https://centercourseware.sflep.com/*",
+        "https://*.chaoxing.com/*",
+        "https://*.xuexitong.com/*"
+      ]
+    },
+    {
+      "resources": [
+        "modules/xuexitong-video-guard.js"
+      ],
+      "matches": [
+        "https://*.chaoxing.com/*",
+        "https://*.xuexitong.com/*"
       ]
     }
   ]
