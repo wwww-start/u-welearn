@@ -59,11 +59,16 @@
       legacy = window.CXLegacy ? window.CXLegacy.findQuestionDocs().length > 0 : false;
       if (legacy) legacyStats = window.CXLegacy.stats();
     } catch (_) {}
+    let moduleType = null;
+    try {
+      moduleType = window.CXVideo?.currentModuleType?.() || null;
+    } catch (_) {}
     return {
       site,
       pageType,
       legacy,
       legacyStats,
+      moduleType,
       params,
       video: window.CXVideo?.status?.() || null,
       answer: window.CXAnswer?.status?.() || null,

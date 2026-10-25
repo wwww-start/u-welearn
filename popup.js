@@ -759,17 +759,32 @@ async function initCXPanel() {
 
     const lines = [];
     lines.push("课程 " + (d.params.courseId || "-") + " · 班级 " + (d.params.clazzId || "-"));
+
+    // 当前任务点类型
+    const TYPE_LABEL = {
+      video: "视频",
+      doc: "文档",
+      ppt: "PPT",
+      work: "作业/测验",
+      insertdoc: "图文",
+      audio: "音频",
+    };
+    if (d.moduleType) {
+      lines.push("当前任务点：" + (TYPE_LABEL[d.moduleType] || d.moduleType));
+    }
+
     if (d.video) {
       if (d.video.video) {
         const v = d.video.video;
         lines.push(
-          "视频 " + v.currentTime + "s / " + v.duration + "s · " +
+          "播放 " + v.currentTime + "s / " + v.duration + "s · " +
           v.rate + "x" + (v.paused ? " · 已暂停" : "")
         );
-      } else {
-        lines.push("视频：未检测到 video 元素");
+      } else if (d.pageType === "video") {
+        lines.push("视频：等待播放器加载");
       }
-      lines.push("播放器守卫：" + (d.globalGuard ? "已生效" : "未生效"));
+      lines.push("播放器守卫：" + (d.globalGuard ? "已生效" : "未生效（刷新页面重试）"));
+      if (d.video.running) lines.push("刷课状态：运行中");
     }
     if (d.answer && d.answer.stats && d.answer.stats.total) {
       lines.push("答题：" + d.answer.stats.answered + "/" + d.answer.stats.total +
@@ -787,15 +802,21 @@ async function initCXPanel() {
       rate,
       seekToLast: !!document.getElementById("cxSeekTail")?.checked,
       autoNext: !!document.getElementById("cxAutoNext")?.checked,
+      autoAnswer: !!document.getElementById("cxAutoAnswer")?.checked,
     };
   }
 
   document.getElementById("cxRefresh")?.addEventListener("click", refresh);
 
   document.getElementById("cxVideoBtn")?.addEventListener("click", async () => {
-    const r = await cxSend("cxStartVideo", { options: videoOptions() });
-    addLog(r?.success ? "info" : "error",
-      r?.success ? "学习通：刷视频已启动（" + videoOptions().rate + "x）" : "学习通：刷视频启动失败");
+    const opts = videoOptions();
+    const r = await cxSend("cxStartVideo", { options: opts });
+    if (r?.success) {
+      addLog("info", "学习通：刷视频已启动（" + opts.rate + "x" +
+        (opts.autoAnswer ? "，遇到作业自动答题" : "，只刷视频") + "）");
+    } else {
+      addLog("error", "学习通：刷视频启动失败（页面未就绪）");
+    }
     refresh();
   });
 
@@ -807,18 +828,6 @@ async function initCXPanel() {
       addLog("info", "学习通答题完成：已答 " + (s.answered || 0) + "，失败 " + (s.failed || 0));
     } else {
       addLog("error", "学习通：答题未启动（页面类型可能不匹配）");
-    }
-    refresh();
-  });
-
-  document.getElementById("cxExamBtn")?.addEventListener("click", async () => {
-    addLog("info", "学习通：开始考试作答…");
-    const r = await cxSend("cxStartExam", { options: {} });
-    if (r?.success) {
-      const s = r.data.stats || {};
-      addLog("info", "学习通考试：已答 " + (s.answered || 0) + "，失败 " + (s.failed || 0));
-    } else {
-      addLog("error", "学习通：考试作答未启动");
     }
     refresh();
   });
