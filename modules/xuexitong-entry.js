@@ -301,8 +301,18 @@
             const r = await window.CXVideo.answerCurrentTask();
             sendResponse({ success: true, data: r });
           } else if (name === "advance") {
+            const steps = {};
+            try {
+              steps.tabs = (window.CXModel.readTaskTabs() || []).map((t) => t.text);
+              steps.taskIndex = window.CXVideo.currentTaskIndex();
+              steps.nextBtn = !!window.CXVideo.findNextButton();
+              steps.iframeSrc = (document.getElementById("iframe") || {}).src || "";
+              const dlg = document.querySelector("#jobFinishTip, .jobFinishTip, .AlertCon02");
+              steps.dialogVisible = !!(dlg && getComputedStyle(dlg).display !== "none" && dlg.getClientRects().length);
+            } catch (err) { steps.err = String(err && err.message); }
+            const before = location.href;
             const r = await window.CXVideo.advance();
-            sendResponse({ success: true, data: r });
+            sendResponse({ success: true, data: { result: r, steps, hrefBefore: before, hrefAfter: location.href, logs: (window.CXVideo.status().logs || []).slice(-12).map((l) => l.msg) } });
           } else if (name === "quiz") {
             const v = window.CXVideo.getVideo();
             const root = v ? window.CXVideo.findQuizRoot(v.ownerDocument) : null;
