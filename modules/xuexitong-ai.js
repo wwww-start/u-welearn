@@ -92,7 +92,14 @@
     if (!node) throw new Error("缺少题目节点");
     node.scrollIntoView({ block: "center", behavior: "instant" });
     await new Promise((r) => setTimeout(r, 250));
-    const rect = node.getBoundingClientRect();
+    // 跨 iframe 时 getBoundingClientRect 是**子文档坐标**，必须换算到顶层视口
+    const rect =
+      window.CXModel && window.CXModel.absoluteRect
+        ? window.CXModel.absoluteRect(node)
+        : (() => {
+            const r = node.getBoundingClientRect();
+            return { x: r.x, y: r.y, width: r.width, height: r.height };
+          })();
     const cap = await new Promise((resolve) => {
       chrome.runtime.sendMessage({ action: "captureVisibleTab" }, (r) => {
         if (chrome.runtime.lastError) return resolve({ success: false, error: chrome.runtime.lastError.message });
@@ -111,6 +118,11 @@
     const y = Math.max(0, Math.round(rect.y * dpr));
     const w = Math.min(bmp.width - x, Math.round(rect.width * dpr));
     const h = Math.min(bmp.height - y, Math.round(rect.height * dpr));
+    // 裁剪过小（元素没进视口 / 坐标算错）会生成 1×1 图，
+    // 模型接口会直接 400，表现为“调用成功但没答案”，所以这里提前报错。
+    if (w < 20 || h < 20) {
+      throw new Error("截图裁剪区域过小（" + w + "×" + h + "），题目可能未进入视口");
+    }
     const canvas = new OffscreenCanvas(Math.max(1, w), Math.max(1, h));
     canvas.getContext("2d").drawImage(bmp, x, y, w, h, 0, 0, w, h);
     const out = await canvas.convertToBlob({ type: "image/png" });
@@ -248,6 +260,16 @@
     });
     if (!res.success) return { ok: false, text: "", via: "model", reason: res.error };
     const raw = String(res.data || "");
+    // deepseek-flash 是推理模型：推理 token 也计入 max_tokens，
+    // 预算被推理吃光时 content 返回空串（finish_reason=length），必须显式提示。
+    if (!raw.trim()) {
+      return {
+        ok: false,
+        text: "",
+        via: "model",
+        reason: "模型返回空内容（可能被 max_tokens 截断，或该模型不支持图片输入）",
+      };
+    }
     const parsed = parseModelAnswer(raw);
     return { ok: !!parsed, text: parsed, via: imageDataUrl ? "model+image" : "model", raw };
   }

@@ -687,8 +687,11 @@ function cxSend(action, extra) {
 }
 
 // 学习通模块清单（与 manifest.json 中第三组保持一致）
+// ⚠️ 必须与 manifest 同序同集合：漏掉 xuexitong-legacy.js 时，
+// 重新加载扩展后补注入的旧版作业页会没有 CXLegacy，答题直接报“页面类型不匹配”。
 const CX_SCRIPTS = [
   "modules/xuexitong-page-model.js",
+  "modules/xuexitong-legacy.js",
   "modules/xuexitong-ai.js",
   "modules/xuexitong-video.js",
   "modules/xuexitong-answer.js",
@@ -743,7 +746,8 @@ async function initCXPanel() {
     study: "学习页",
     work: "作业作答页",
     "work-list": "作业列表",
-    exam: "考试页",
+    exam: "考试作答页",
+    "exam-preview": "整卷预览/查看页（只读）",
     "paper-review": "试卷回顾",
     other: "其他页面",
   };
@@ -798,11 +802,14 @@ async function initCXPanel() {
 
   function videoOptions() {
     const rate = parseFloat(document.getElementById("cxRate")?.value || "2");
+    const autoAnswer = !!document.getElementById("cxAutoAnswer")?.checked;
     return {
       rate,
       seekToLast: !!document.getElementById("cxSeekTail")?.checked,
       autoNext: !!document.getElementById("cxAutoNext")?.checked,
-      autoAnswer: !!document.getElementById("cxAutoAnswer")?.checked,
+      // 勾了"自动答题"就连带自动提交；不勾则只刷视频，作业/PPT/文档一律跳过
+      autoAnswer,
+      autoSubmitTask: autoAnswer,
     };
   }
 
@@ -813,7 +820,7 @@ async function initCXPanel() {
     const r = await cxSend("cxStartVideo", { options: opts });
     if (r?.success) {
       addLog("info", "学习通：刷视频已启动（" + opts.rate + "x" +
-        (opts.autoAnswer ? "，遇到作业自动答题" : "，只刷视频") + "）");
+        (opts.autoAnswer ? "，自动答题并提交" : "，只刷视频（跳过答题/PPT等）") + "）");
     } else {
       addLog("error", "学习通：刷视频启动失败（页面未就绪）");
     }
@@ -824,12 +831,30 @@ async function initCXPanel() {
     addLog("info", "学习通：开始答题…");
     const r = await cxSend("cxStartAnswer", { options: {} });
     if (r?.success) {
-      const s = r.data.stats || {};
-      addLog("info", "学习通答题完成：已答 " + (s.answered || 0) + "，失败 " + (s.failed || 0));
+      const s = r.data?.stats || {};
+      if (!s.total) {
+        addLog("warning", "学习通：本页识别到 0 道题 —— 检查是否在作答页（预览/回顾页不能作答）");
+      } else {
+        addLog("info", "学习通答题完成：已答 " + (s.answered || 0) + "，失败 " + (s.failed || 0));
+      }
+      const logs = r.data?.logs || [];
+      logs.slice(-6).forEach((l) => addLog(l.level === "error" ? "error" : "info", "  " + l.msg));
     } else {
-      addLog("error", "学习通：答题未启动（页面类型可能不匹配）");
+      addLog("error", "学习通：" + (r?.error || "答题未启动（页面未响应）"));
     }
     refresh();
+  });
+
+  document.getElementById("cxInspectBtn")?.addEventListener("click", async () => {
+    const r = await cxSend("cxInspect");
+    if (!r || !r.success) {
+      addLog("error", "学习通：结构自检失败（页面未响应，刷新后重试）");
+      return;
+    }
+    const d = r.data;
+    addLog("success", "学习通：结构自检已保存（chrome.storage.local → cxInspect）");
+    addLog("info", "页面：" + d.pageType + " · " + d.title);
+    addLog("info", "命中元素：" + Object.entries(d.counts).map(([k, v]) => k + "=" + v).join(" · "));
   });
 
   document.getElementById("cxStopBtn")?.addEventListener("click", async () => {

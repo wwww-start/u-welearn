@@ -96,6 +96,30 @@
     }
   }
 
+  /** 跳下一题：严格匹配，绝不误点「上一题」或答题卡里的其它项 */
+  async function advance() {
+    const nodes = [
+      ...document.querySelectorAll(
+        'a, button, [role="button"], .nextPage, #nextPage, [onclick*="next"], [class*="nextPage"]'
+      ),
+    ].filter((el) => el.offsetParent !== null && !el.disabled);
+
+    const hit = nodes.find((el) => {
+      const t = (el.textContent || "").replace(/\s+/g, "").trim();
+      if (!t || /上一/.test(t)) return false;
+      return /^(下一题|下一页|下一頁|下一章|下一节)$/.test(t);
+    });
+    if (!hit) return false;
+    try {
+      hit.removeAttribute("href");
+      hit.click();
+    } catch (_) {
+      return false;
+    }
+    await sleep(1400);
+    return true;
+  }
+
   /**
    * 主流程：逐题作答
    * 注意：考试有单题限时，所以每题作答要快；AI 超时即放弃该题，不阻塞。
@@ -110,6 +134,9 @@
         submitWhenRemainingSec: 60,
         perQuestionTimeoutMs: 25000,
         maxLoops: 200,
+        // 默认**不自动翻页**：只答当前屏这一题。
+        // 一屏一题的考试页上，自动翻页一旦错位就会把整卷翻过去（跳过 11 题的元凶）。
+        autoAdvance: false,
       },
       options || {}
     );
@@ -123,6 +150,8 @@
     log("扫描到 " + questions.length + " 道题");
 
     let loops = 0;
+    let sameQid = 0;
+    let lastQid = null;
     while (loops++ < opts.maxLoops) {
       if (state.paused) {
         log("已暂停");
@@ -161,12 +190,20 @@
       }
       if (q.answers.mine) {
         log(`第 ${q.index ?? q.seq + 1} 题已作答，寻找下一题`);
-        // 尝试点"下一题"
-        const next = [...document.querySelectorAll('a,button,[class*="next"]')].find(
-          (el) => /下一题|下一頁|下一/.test((el.textContent || "").trim()) && el.offsetParent !== null
-        );
-        if (next) next.click();
-        await sleep(1200);
+        // 翻页没生效时（题目没换）不能无限点，最多连认三次同一题就收手
+        if (q.qid && q.qid === lastQid) {
+          if (++sameQid >= 3) {
+            log("翻页似乎没生效（连着同一题），已停止，请人工翻页", "warn");
+            break;
+          }
+        } else {
+          sameQid = 1;
+          lastQid = q.qid;
+        }
+        if (!(await advance())) {
+          log("没找到「下一题」按钮，停在当前页", "warn");
+          break;
+        }
         continue;
       }
 
@@ -180,12 +217,13 @@
         sleep(opts.perQuestionTimeoutMs).then(() => ({ labels: [], texts: [], source: "timeout" })),
       ]);
 
+      let applied = false;
       if (!ans.labels.length && !ans.texts.length) {
         state.stats.failed++;
-        log(`第 ${q.index ?? q.seq + 1} 题未取得答案（${ans.source}）`, "error");
+        log(`第 ${q.index ?? q.seq + 1} 题未取得答案（${ans.source}${ans.reason ? "：" + ans.reason : ""}）`, "error");
       } else {
         // 直接复用 answer 模块的填充逻辑
-        const applied = await (async () => {
+        applied = await (async () => {
           let n = 0;
           if (ans.labels.length) {
             for (const label of ans.labels) {
@@ -197,26 +235,33 @@
                 await sleep(100);
               }
             }
+          } else if (ans.texts.length && typeof window.CXAnswer.fillText === "function") {
+            if (await window.CXAnswer.fillText(q, ans.texts)) n = 1;
           }
           return n > 0;
         })();
         if (applied) {
           state.stats.answered++;
-          log(`第 ${q.index ?? q.seq + 1} 题 ← ${ans.source}: ${ans.labels.join(",")}`);
+          log(`第 ${q.index ?? q.seq + 1} 题 ← ${ans.source}: ${ans.labels.join(",") || ans.texts.join(" / ")}`);
         } else {
           state.stats.failed++;
+          log(`第 ${q.index ?? q.seq + 1} 题填充失败（选项或输入框未匹配）`, "error");
         }
       }
 
-      // 单题限时会自动跳下一题，这里也主动点一次
-      const nextBtn = [...document.querySelectorAll('a,button,[class*="next"]')].find(
-        (el) => /下一题|下一頁|下一/.test((el.textContent || "").trim()) && el.offsetParent !== null
-      );
-      if (nextBtn) {
-        nextBtn.click();
-        await sleep(1200);
-      } else {
-        await sleep(1000);
+      // ⚠️ 只有真正作答成功、且显式开启了 autoAdvance 才前进。
+      //    默认停在当前题，绝不让脚本把整卷翻过去。
+      if (!opts.autoAdvance) {
+        log("已停在当前题（默认不自动翻页）。换题后可以再点一次「答题」。");
+        break;
+      }
+      if (!applied && opts.stopOnFailure !== false) {
+        log("已停在当前题：先确认这道题能不能点（查看页不可作答）", "warn");
+        break;
+      }
+      if (!(await advance())) {
+        log("没有更多题目，本轮结束");
+        break;
       }
     }
 
@@ -231,6 +276,7 @@
 
   window.CXExam = {
     run,
+    advance,
     submitExam,
     pause() {
       state.paused = true;

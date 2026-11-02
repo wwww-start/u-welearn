@@ -43,8 +43,15 @@
     // 旧版作业 / 章节练习作答页
     if (/\/work\/doHomeWorkNew/.test(p)) return "work";
     if (/\/mooc2\/work\/list/.test(p)) return "work-list";
-    if (/reVersionPaperMarkContentNew/.test(p)) return "paper-review";
-    // 新版考试整卷预览/作答（mooc1-api 域）
+    // 查看/回顾页（只能看，不能改）——注意：`mooc2/exam/preview` **不是**预览页，
+    // 它是 newMooc 的整卷作答页（URL 带 remainTimeParam / monitorStatus / relationAnswerLastUpdateTime）。
+    if (/\/exam-ans\/[^?]*\/(look)(\/|$|\?)/.test(p)) return "exam-preview";
+    if (/\/exam\/test\/look(\/|$|\?)/.test(p)) return "exam-preview";
+    // 考前须知 / 考试重置页：只是说明页，点上没有题
+    if (/\/examcode\/examnotes/.test(p)) return "exam-preview";
+    // 考试作答页（一屏一题，p=页码）
+    if (/reVersionPaperMarkContentNew/.test(p)) return "exam";
+    if (/reVersionTestStartNew/.test(p)) return "exam";
     if (/\/exam-ans\/mooc2\/exam\/(preview|test|doexam)/.test(p)) return "exam";
     if (/\/exam-ans\/exam\/test\//.test(p)) return "exam";
     if (/\/mooc-ans\/knowledge\/cards/.test(p)) return "cards";
@@ -82,10 +89,11 @@
       .trim();
   }
 
-  /** 从题号行解析题型与分值，如 "1. (单选题, 5.0 分)" */
+  /** 从题号行解析题型与分值，如 "1. (单选题, 5.0 分)" / "1.（单选题，5.0 分）" */
   function parseTitle(raw) {
     const t = clean(raw);
-    const m = t.match(/\(\s*([^,，)]+?)\s*[,，]\s*([\d.]+)\s*分\s*\)/);
+    // 学习通页面全角/半角括号混用，两种都要吃
+    const m = t.match(/[（(]\s*([^,，)）]+?)\s*[,，]\s*([\d.]+)\s*分\s*[)）]/);
     let type = "unknown";
     let score = null;
     if (m) {
@@ -175,7 +183,56 @@
         node: n,
       });
     });
+    if (out.length) return out;
+
+    // --- 兜底：考试作答页（exam-ans）结构不固定，按"可点选项"特征抓 ---
+    // 只在题目容器内匹配；答题卡（题号导航）必须排除，否则点选项会变成"跳到第 N 题"。
+    const CARD_SELECTOR =
+      '#answerSheet, #answerSheetH, .answerSheet, .answerSheetBox, .Marking_right_280, ' +
+      '.markingRight_paper, .topicNumber_list, ul.topicNumber_list, .legendBox, ' +
+      '.phone_main_title, h4.cardTit, li[data-asq], li[id^="answerSheet"], li.nav-revise';
+    const isCard = (n) => {
+      try { return !!n.closest(CARD_SELECTOR); } catch (_) { return true; }
+    };
+    const generic = li.querySelectorAll(
+      '#randomOptions li, .randomOptions li, ul li[role="option"], ul li[role="radio"], ' +
+      'ul li[role="checkbox"], li[onclick*="addChoice"], li[onclick*="choose"], ' +
+      '.stem_answer li, .answerList li'
+    );
+    generic.forEach((n, i) => {
+      if (isCard(n)) return;
+      if (n.querySelector('li')) return; // 只取叶子项
+      const numEl = n.querySelector(".num_option, .option_num, i");
+      const shown = clean(numEl ? numEl.textContent : "");
+      const dataLabel = numEl ? (numEl.getAttribute("data") || "") : "";
+      let label = (dataLabel || shown || "").replace(/[^A-Za-z]/g, "").toUpperCase();
+      if (label.length > 1) label = label[0];
+      if (!label) label = String.fromCharCode(65 + i);
+      const textNode = n.querySelector(".after, .answer_p, span:not(.num_option)");
+      out.push({
+        index: i,
+        label,
+        originalLabel: label,
+        text: clean(textNode ? textNode.textContent : n.textContent),
+        raw: clean(n.textContent),
+        node: n,
+      });
+    });
     return out;
+  }
+
+  /** 该节点是否属于答题卡（题号导航）——点击它等于跳题，绝不能在填答案时点 */
+  function isAnswerSheetNode(node) {
+    if (!node || !node.closest) return false;
+    try {
+      return !!node.closest(
+        '#answerSheet, #answerSheetH, .answerSheet, .answerSheetBox, .Marking_right_280, ' +
+        '.markingRight_paper, .topicNumber_list, ul.topicNumber_list, .legendBox, ' +
+        '.phone_main_title, h4.cardTit, li[data-asq], li[id^="answerSheet"], li.nav-revise'
+      );
+    } catch (_) {
+      return true;
+    }
   }
 
   /** 已有答案（回顾态 / 新版隐藏 input） */
@@ -212,30 +269,91 @@
     );
   }
 
-  /** 从容器提取全部题目 */
+  /** 读取单道题（`.questionLi` 节点 → 结构化题目） */
+  function readQuestion(li, i, doc) {
+    const markName = li.querySelector(".mark_name");
+    const rawTitle = clean(markName ? markName.textContent : "");
+    const titleInfo = parseTitle(rawTitle);
+    // 题号常在题干 div 里，被 "(单选题, 5.0 分)" 挤到前面，单独再抠一次
+    if (titleInfo.index == null && markName) {
+      try {
+        const clone = markName.cloneNode(true);
+        clone.querySelectorAll(".colorShallow").forEach((n) => n.remove());
+        const m = clean(clone.textContent).match(/^\s*(\d+)\s*[.．、)）]/);
+        if (m) titleInfo.index = parseInt(m[1], 10);
+      } catch (_) {}
+    }
+    return {
+      seq: i,
+      qid: readQuestionId(li),
+      index: titleInfo.index,
+      type: titleInfo.type,
+      score: titleInfo.score,
+      titleRaw: titleInfo.raw,
+      stem: readStem(li),
+      options: readOptions(li),
+      answers: readAnswers(li),
+      node: li,
+      doc: doc || (li.ownerDocument || document),
+    };
+  }
+
+  /** 从容器提取全部题目（仅当前文档） */
   function extractQuestions(root) {
     const scope = root || document;
     const list = scope.querySelectorAll(".questionLi");
     const out = [];
-    list.forEach((li, i) => {
-      const titleInfo = parseTitle(li.querySelector(".mark_name")?.textContent || "");
-      const stem = readStem(li);
-      const options = readOptions(li);
-      const answers = readAnswers(li);
-      out.push({
-        seq: i,
-        qid: readQuestionId(li),
-        index: titleInfo.index,
-        type: titleInfo.type,
-        score: titleInfo.score,
-        titleRaw: titleInfo.raw,
-        stem,
-        options,
-        answers,
-        node: li,
-      });
-    });
+    list.forEach((li, i) => out.push(readQuestion(li, i, scope.ownerDocument || document)));
     return out;
+  }
+
+  /**
+   * 跨同域 iframe 提取题目。
+   * 学习页的题在 studentstudy → #iframe(knowledge/cards) → ananas/modules/work 里，
+   * 顶层 document 一条都取不到，所以自动答题必须走这个版本。
+   */
+  function extractQuestionsDeep(root) {
+    const out = [];
+    const seen = new Set();
+    const walk = (doc, depth) => {
+      if (!doc || depth > 6 || out.length > 400) return;
+      let list = [];
+      try { list = [...doc.querySelectorAll(".questionLi")]; } catch (_) {}
+      for (const li of list) {
+        if (seen.has(li)) continue;
+        seen.add(li);
+        out.push(readQuestion(li, out.length, doc));
+      }
+      let frames = [];
+      try { frames = [...doc.querySelectorAll("iframe")]; } catch (_) {}
+      for (const fr of frames) {
+        let d = null;
+        try { d = fr.contentDocument; } catch (_) {}
+        if (d && d.body) walk(d, depth + 1);
+      }
+    };
+    walk((root && (root.ownerDocument || root)) || document, 0);
+    return out;
+  }
+
+  /** 元素在**顶层窗口**中的绝对矩形（跨 iframe 截图必须用它） */
+  function absoluteRect(node) {
+    const r = node.getBoundingClientRect();
+    let x = r.x, y = r.y;
+    let doc = node.ownerDocument || document;
+    let win = doc.defaultView;
+    let guard = 0;
+    while (win && win !== window && guard++ < 8) {
+      let fe = null;
+      try { fe = win.frameElement; } catch (_) {}
+      if (!fe) break;
+      const fr = fe.getBoundingClientRect();
+      x += fr.x;
+      y += fr.y;
+      doc = fe.ownerDocument;
+      win = doc.defaultView;
+    }
+    return { x, y, width: r.width, height: r.height };
   }
 
   /** 摘要（供 UI 展示，避免把 DOM 节点传出） */
@@ -293,8 +411,12 @@
     parseTitle,
     readStem,
     readOptions,
+    isAnswerSheetNode,
     readAnswers,
     extractQuestions,
+    extractQuestionsDeep,
+    absoluteRect,
+    readQuestion,
     summarize,
     readTaskTabs,
     readCatalogNodes,

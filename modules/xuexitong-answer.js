@@ -53,6 +53,19 @@
 
     const s = String(raw == null ? "" : raw).trim();
 
+    // 0) 连写字母：ACD / AC —— prompt 明确要求多选连写，但旧逻辑只认 "A,C"，
+    //    导致所有多选题的答案被当成长文本、填不进去（已复现）。
+    if (question.options.length) {
+      const contiguous = s.match(/^[A-Za-z]{1,8}$/);
+      if (contiguous) {
+        const letters = s.toUpperCase().split("");
+        if (letters.every((L) => question.options.some((o) => o.label === L))) {
+          out.labels = letters;
+          return out;
+        }
+      }
+    }
+
     // 1) 纯字母串：AC / A,C / A、C
     const letterOnly = s.match(/^[A-Za-z](?:\s*[,，、/\s]\s*[A-Za-z])*$/);
     if (letterOnly && question.options.length) {
@@ -86,6 +99,11 @@
   function clickOption(question, label) {
     const opt = question.options.find((o) => o.label === label.toUpperCase());
     if (!opt) return false;
+    // 答题卡（题号导航）绝对不能点：点一下就是"跳到第 N 题"
+    if (window.CXModel.isAnswerSheetNode && window.CXModel.isAnswerSheetNode(opt.node)) {
+      log("跳过 " + label + "：目标属于答题卡/导航，不是选项", "warn");
+      return false;
+    }
     try {
       opt.node.scrollIntoView({ block: "center" });
       // 移除 href 防止跳转（实测页面按钮常带 href）
@@ -277,7 +295,8 @@
     state.paused = false;
     state.results = [];
 
-    const questions = window.CXModel.extractQuestions();
+    const questions =
+      (window.CXModel.extractQuestionsDeep || window.CXModel.extractQuestions)();
     state.stats.total = questions.length;
     log("扫描到 " + questions.length + " 道题，开始作答");
 
@@ -338,6 +357,9 @@
 
   window.CXAnswer = {
     run,
+    // 供考试模块复用
+    fillText,
+    clickOption,
     pause() {
       state.paused = true;
       return { ok: true };

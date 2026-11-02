@@ -43,9 +43,9 @@
           <button class="btn btn-primary" id="cxAnswerBtn" style="flex:1">答题</button>
         </div>
 
-        <label style="display:flex;align-items:center;gap:8px;margin:10px 4px;font-size:12px;color:#555;cursor:pointer">
-          <input id="cxAutoAnswer" type="checkbox" checked>
-          刷课时自动答题（不勾则只刷视频）
+        <label style="display:flex;align-items:flex-start;gap:8px;margin:10px 4px;font-size:12px;color:#555;cursor:pointer;line-height:1.5">
+          <input id="cxAutoAnswer" type="checkbox" checked style="margin-top:2px">
+          <span>刷课时自动答题且自动提交（不勾则只刷视频，跳过答题、看 PPT 等其他部分）</span>
         </label>
 
         <div class="action-row" style="display:flex;gap:6px">
@@ -55,6 +55,9 @@
         <div class="action-row" style="display:flex;gap:6px;margin-top:6px">
           <button class="btn btn-outline" id="cxVerifyBtn" style="flex:1">核对未作答</button>
           <button class="btn btn-primary" id="cxSubmitBtn" style="flex:1;background:#c0392b">确认提交</button>
+        </div>
+        <div class="action-row" style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-outline" id="cxInspectBtn" style="flex:1;font-size:12px">结构自检（页面不适配时点我）</button>
         </div>
         <div style="font-size:11px;color:#c0392b;margin:6px 4px;line-height:1.5">
           ⚠ 默认<b>不会自动提交</b>。作答完成后请先核对，再点「确认提交」。

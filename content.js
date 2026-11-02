@@ -240,21 +240,23 @@
     } catch (e) { sendLog('warning', '配对答案读取未成功：' + e.message); }
     let rows = window.CourseAnswerTools.sequence(sequence, raw);
     if (!rows && !isStale()) {
-      if (sequence.items.some(o=>o.images?.length && !o.text && !o.images.every(img=>img.alt))) {
+      if (!courseVision.supports(config) && sequence.items.some(o=>o.images?.length && !o.text && !o.images.every(img=>img.alt))) {
         sendLog('warning', '图片选项缺少文字说明，当前文本模型缺少判断依据；等待网页答案或图片识别');
         return;
       }
       const q = {type:'sequence',text:sequence.slots.map((v,i)=>(i+1)+'. '+v.text).join('\n'),
         direction:'按题号顺序返回选项字母数组，每个字母只能使用一次。',inputs:[],
         options:sequence.items.map(o=>({label:o.label,text:o.text||o.images.map(x=>x.alt).join(' ')})),
-        context:document.querySelector('.abs-direction')?.textContent || ''};
+        context:document.querySelector('.abs-direction')?.textContent || '',
+        visualRoot:document.querySelector('.sequence-view,.sortable-list-wrapper')?.closest('.question-common-abs-question-container') || document.querySelector('.sequence-view,.sortable-list-wrapper'),
+        visualLabels:sequence.items.flatMap(o=>(o.images||[]).map(img=>({src:img.src,label:'Option '+o.label})))};
       let result;
       try { result = await getAnswerWithBackoff(q); }
       catch (e) { if(isAiAuthError(e))aiAuthFailed=true;sendLog('warning','参考答案请求未成功：'+e.message);return; }
       if (isStale()) return;
       rows = window.CourseAnswerTools.sequence(sequence, result?.answer);
       source = 'AI参考答案';
-      note = '依据当前文字材料生成，请核对后手动排列；展示不计为已提交';
+      note = q._visionUsed ? '结合当前题目图片生成，请核对后手动排列；展示不计为已提交' : '依据当前文字材料生成，请核对后手动排列；展示不计为已提交';
     }
     if (rows) chrome.runtime.sendMessage({type:'answerPreview',source,rows,note,page:getCoursePageMarker()});
     else sendLog('warning','本页参考答案尚未取得或排列格式未通过校验');
@@ -1794,6 +1796,122 @@ ${payload}`;
     cancelRequested = true;
   }
 
+  // COURSE_VISION_START: U校园 / WE Learn only; existing single-image API is reused.
+  const courseVision = (() => {
+    const supports = c => /^deepseek-(?:v4(?:\.1)?-)?flash(?:-vision-exp|-1017)?$/i.test(String(c?.model || '').trim());
+    const visualSelector = 'img,svg,canvas';
+    function collect(q) {
+      let root = q.visualRoot || q.element || q.inputs?.find(x=>x.element)?.element || q.options?.find(x=>x.element)?.element;
+      if (!root) return [];
+      if (root.matches?.('input,textarea,select,[contenteditable=true]')) {
+        root = root.closest('et-stem,[data-itemtype=question],.question-common-abs-reply,tr,li,p') || root.parentElement;
+      } else if (root.matches?.('ul,et-choice,et-tof')) {
+        root = root.closest('et-stem,[data-itemtype=question]') ||
+          (root.parentElement?.querySelectorAll('ul[data-itemtype=options],et-choice,et-tof').length===1 ? root.parentElement : root);
+      }
+      const roots = [root];
+      const material = root.closest?.('.question-common-abs-question-container')?.querySelector('.question-common-abs-material');
+      if (material && !root.contains(material)) roots.push(material);
+      const nodes = [...new Set(roots.flatMap(r=>[...(r.matches?.(visualSelector)?[r]:[]), ...r.querySelectorAll(visualSelector)]))];
+      const assets = [];
+      for (const node of nodes) {
+        if (node.closest('video,audio,.video-js,.component-analysis,[hidden],[aria-hidden=true],[role=presentation],[data-vision-ignore]')) continue;
+        let hidden = false;
+        for (let n=node;n?.nodeType===1;n=n.parentElement) {
+          const style=getComputedStyle(n);
+          if (style.display==='none'||style.visibility==='hidden') { hidden=true; break; }
+        }
+        if (hidden) continue;
+        let src=node.currentSrc||node.src||node.getAttribute('src')||node.getAttribute('data-src')||'';
+        if(src) { try { src=new URL(src,document.baseURI).href; } catch {} }
+        const option=q.options?.find(o=>o.element?.contains(node));
+        const explicit=q.visualLabels?.find(x=>x.src===src);
+        const label=option?'Option '+option.label:explicit?.label || 'Material '+(assets.length+1);
+        assets.push({node,src,label});
+      }
+      return assets;
+    }
+    function message(payload) {
+      return new Promise((resolve,reject)=>{
+        const timer=setTimeout(()=>reject(new Error('图片读取超时')),15000);
+        chrome.runtime.sendMessage(payload,result=>{
+          clearTimeout(timer);
+          if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+          if (!result?.success) return reject(new Error(result?.error||'图片读取失败'));
+          resolve(result);
+        });
+      });
+    }
+    function decode(url) {
+      return new Promise((resolve,reject)=>{
+        const img=new Image();
+        const timer=setTimeout(()=>{img.onload=img.onerror=null;reject(new Error('图片解码超时'));},10000);
+        img.onload=()=>{clearTimeout(timer);resolve(img);};
+        img.onerror=()=>{clearTimeout(timer);reject(new Error('图片格式不可读'));};
+        img.src=url;
+      });
+    }
+    async function load(asset) {
+      let url=asset.src;
+      const tag=asset.node.tagName.toLowerCase();
+      if (tag==='canvas') url=asset.node.toDataURL('image/png');
+      else if (tag==='svg') {
+        const clone=asset.node.cloneNode(true), rect=asset.node.getBoundingClientRect();
+        clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+        clone.setAttribute('width',Math.max(1,rect.width));
+        clone.setAttribute('height',Math.max(1,rect.height));
+        url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(new XMLSerializer().serializeToString(clone));
+      } else if (/^https?:/i.test(url)) url=(await message({action:'fetchImageAsDataUrl',url})).dataUrl;
+      else if (/^blob:/i.test(url)) {
+        const response=await fetch(url);
+        if (!response.ok) throw new Error('页面图片读取失败');
+        const blob=await response.blob();
+        url=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('图片读取失败'));reader.readAsDataURL(blob);});
+      }
+      if (typeof url!=='string'||!url.startsWith('data:image/')||url.length>16000000) throw new Error('图片为空、过大或格式未支持');
+      const image=await decode(url);
+      if (!image.naturalWidth||!image.naturalHeight||image.naturalWidth*image.naturalHeight>32000000) throw new Error('图片尺寸超出处理范围');
+      return {...asset,image};
+    }
+    async function prepare(q,c,cancelled=()=>false) {
+      // Existing answer paths run first; text-only questions never fetch images.
+      if (q.needsVision === false || !supports(c)) return null;
+      const assets=collect(q);
+      if (!assets.length) return null;
+      if (assets.length>8) throw new Error('本题超过 8 张图片，请分组查看后手动完成');
+      const loaded=[];
+      for (const asset of assets) {
+        if (cancelled()) throw new Error('操作已停止');
+        try { loaded.push(await load(asset)); }
+        catch(error) { throw new Error(asset.label+'：'+error.message); }
+      }
+      const columns=loaded.length>1?2:1, cellWidth=1000;
+      const cells=loaded.map(a=>{
+        const scale=Math.min(1,960/a.image.naturalWidth,800/a.image.naturalHeight);
+        return {...a,w:Math.max(1,Math.round(a.image.naturalWidth*scale)),h:Math.max(1,Math.round(a.image.naturalHeight*scale))};
+      });
+      const heights=[];
+      for(let i=0;i<cells.length;i+=columns) heights.push(Math.max(...cells.slice(i,i+columns).map(a=>a.h))+64);
+      const canvas=document.createElement('canvas');
+      canvas.width=columns*cellWidth;canvas.height=heights.reduce((a,b)=>a+b,0);
+      const ctx=canvas.getContext('2d');
+      if(!ctx) throw new Error('浏览器未提供图像画布');
+      ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.font='26px sans-serif';ctx.textBaseline='top';
+      let y=0;
+      cells.forEach((a,i)=>{
+        const x=(i%columns)*cellWidth;
+        ctx.fillStyle='#111';ctx.fillText(a.label+' / Image '+(i+1),x+20,y+12,960);
+        ctx.drawImage(a.image,x+20,y+48,a.w,a.h);
+        if(i%columns===columns-1)y+=heights[Math.floor(i/columns)];
+      });
+      return {dataUrl:canvas.toDataURL('image/jpeg',0.92),count:cells.length,
+        legend:cells.map((a,i)=>'Image '+(i+1)+': '+a.label).join('\n')};
+    }
+    return {supports,collect,prepare};
+  })();
+  // COURSE_VISION_END
+
   // 逐题获取AI答案（只发送单道题目，不发送整页HTML）
   async function getAIAnswerForQuestion(question) {
     // U校园快速路径：答案已从 API 获取
@@ -1907,6 +2025,16 @@ ${payload}`;
 - 填空题answer为答案数组，如 ["答案1"] 或 ["答案1", "答案2"]
 - 只返回JSON，不要其他内容`;
 
+    const visionSerial=scanSerial;
+    let vision;
+    try { vision=await courseVision.prepare(question,config,()=>cancelRequested||visionSerial!==scanSerial); }
+    catch(error) { sendLog('warning','本题视觉素材未完整读取，保留为未完成：'+error.message); return null; }
+    if(cancelRequested||visionSerial!==scanSerial) return null;
+    question._visionUsed=!!vision;
+    if(vision) {
+      prompt+='\n附图为本题视觉素材，图片标签与选项对应如下：\n'+vision.legend+'\n请结合图片与文字；Material 表示材料图，标签不明确时不要推断对应关系。';
+      sendLog('info',`DeepSeek 视觉输入：已附带 ${vision.count} 张题目图片（标注选项后合并发送）`);
+    }
     sendLog('info', `答案来源：AI 请求（模型 ${config?.model || '未配置'}）`);
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
@@ -1914,6 +2042,7 @@ ${payload}`;
           action: "callAI",
           config,
           prompt,
+          imageDataUrl: vision?.dataUrl || null,
         },
         (response) => {
           if (chrome.runtime.lastError) {
@@ -1929,7 +2058,7 @@ ${payload}`;
           try {
             const answer = parseAIResponse(response.data);
             // 存入题库
-            if (window.questionBank && answer && answer.answer) {
+            if (!vision && window.questionBank && answer && answer.answer) {
               window.questionBank.store('unipus', question.text, answer.answer, question.type);
             }
             resolve(answer);
@@ -2338,3 +2467,4 @@ ${payload}`;
     }
   }
 })();
+

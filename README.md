@@ -117,6 +117,33 @@ v1.5.0 新增，详见 [学习通指南.md](学习通指南.md)。
 
 公开源码不包含账号密码、API Key、浏览器会话或课程采集内容。请勿把这些内容提交到 Issues 或仓库。
 
+## 出问题时怎么反馈（结构采集器）
+
+学习通页面改版很快，遇到「识别不到题目 / 点不动 / 翻页失败 / 视频题不提交」这类问题，先采一份页面结构再反馈，比截图和文字描述有效得多。
+
+1. 用 Tampermonkey（篡改猴）或 ScriptCat（脚本猫）新建脚本，粘贴 [`学习通页面结构采集器.user.js`](学习通页面结构采集器.user.js) 全部内容并保存。
+2. 打开出问题的那一页（作业、章节测验、考试、学习页都行），等题目/弹窗出现。
+3. 页面右下角有个小圆点「⦿ 结构采集」，点开 → 点「采集并下载」，会得到一个 `cx-capture-<域名>_<路径>-<时间>.json`。
+4. 把这个 JSON 连同一段面板日志（侧边栏「运行日志」里的几行）一起反馈。
+
+采集器只读，不点击、不修改、不提交，可以放心在考试页用；面板默认折叠成小圆点，`Alt+H` 收起/展开。它能采到：
+
+- 各套选择器命中数量（`.questionLi` / `.TiMu` / `.answerBg` / `#fanyaMarking` / `#answerSheet` / `li[data-asq]` / `#prevNextFocusNext` …）
+- 题目容器骨架（标签、类名、id、role、data 属性、onclick、短文本）
+- 同域 iframe 递归（题目常在 `study → knowledge/cards → ananas/modules/*` 三层里）
+- 视频内嵌题专项：题型、`共N题已答对M题` 计数器、提交按钮候选、选项/radio 候选
+- 翻页与提交按钮候选、隐藏域（`_studystate`、`input[name=questionId]` 等）
+
+扩展侧还有内置诊断探针，控制台或侧边栏发一条消息即可：
+
+```js
+chrome.tabs.sendMessage(tabId, { action: 'cxProbe', name: 'diag' })        // 页面类型/模块类型/任务点序号/深度与浅层题目数
+chrome.tabs.sendMessage(tabId, { action: 'cxProbe', name: 'advance' })     // 翻到下一节（会真实点击）
+chrome.tabs.sendMessage(tabId, { action: 'cxProbe', name: 'answerTask' })  // 在当前任务点答题（含自动提交）
+chrome.tabs.sendMessage(tabId, { action: 'cxProbe', name: 'quiz' })        // 视频内嵌题作答+提交
+chrome.tabs.sendMessage(tabId, { action: 'cxProbe', name: 'resume' })      // 查看刷课续跑状态
+```
+
 ## 验证范围
 
 本版完成 95 个 U校园保存页面的识别回放，以及 66 个 WE Learn 保存课件的当前页检查。离线导航测试覆盖 U校园 95 页、WE Learn 67 个目录入口及 160 个内嵌目标。WE Learn 课程说明入口没有保存的正文样本，导航已纳入测试。
