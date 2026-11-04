@@ -787,7 +787,7 @@ async function initCXPanel() {
       } else if (d.pageType === "video") {
         lines.push("视频：等待播放器加载");
       }
-      lines.push("播放器守卫：" + (d.globalGuard ? "已生效" : "未生效（刷新页面重试）"));
+      lines.push("播放器守卫：" + (d.globalGuard ? "已生效" : ((d.video && d.video.video) ? "未生效（刷新页面重试）" : "不适用（当前页无播放器）")));
       if (d.video.running) lines.push("刷课状态：运行中");
     }
     if (d.answer && d.answer.stats && d.answer.stats.total) {

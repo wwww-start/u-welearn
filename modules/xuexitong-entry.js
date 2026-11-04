@@ -52,6 +52,34 @@
     });
   }
 
+  /**
+   * 播放器守卫跑在视频 iframe 的 MAIN world，顶层隔离世界读不到它的 window 变量。
+   * 守卫会在自己的 documentElement 上打 data-cx-video-guard="1"，这里递归同域
+   * iframe 读这个属性，才能得到真实状态。
+   */
+  function detectVideoGuard() {
+    const MARK = "data-cx-video-guard";
+    try {
+      if (document.documentElement && document.documentElement.getAttribute(MARK) === "1") return true;
+    } catch (_) {}
+    const walk = (doc, depth) => {
+      if (depth > 6) return false;
+      let frames = [];
+      try { frames = [...doc.querySelectorAll("iframe")]; } catch (_) { return false; }
+      for (const fr of frames) {
+        let d = null;
+        try { d = fr.contentDocument; } catch (_) {}
+        if (!d || !d.documentElement) continue;
+        try {
+          if (d.documentElement.getAttribute(MARK) === "1") return true;
+        } catch (_) {}
+        if (walk(d, depth + 1)) return true;
+      }
+      return false;
+    };
+    return walk(document, 0);
+  }
+
   function snapshot() {
     let legacy = false;
     let legacyStats = null;
@@ -73,7 +101,7 @@
       video: window.CXVideo?.status?.() || null,
       answer: window.CXAnswer?.status?.() || null,
       exam: window.CXExam?.status?.() || null,
-      globalGuard: !!window.__CX_VIDEO_GUARD__,
+      globalGuard: detectVideoGuard(),
     };
   }
 

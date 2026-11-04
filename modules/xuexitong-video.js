@@ -148,6 +148,7 @@
   /* ---------------- 视频内嵌题（播放器里弹出的测验）自动作答 + 提交 ---------------- */
 
   const quizHandled = new WeakSet();
+  const quizDoneStems = new Set(); // 已处理过的题干，防同题重复提交
 
   /**
    * 元素是否真的看得见。
@@ -188,7 +189,7 @@
   /** 节流地在所有同域文档里找内嵌题，并把"没找到"写进日志 */
   function findQuizRootCached(video) {
     const now = Date.now();
-    if (now - (state._quizScanAt || 0) < 1200) return state._quizFound || null;
+    if (now - (state._quizScanAt || 0) < 600) return state._quizFound || null;
     state._quizScanAt = now;
 
     const docs = [];
@@ -214,8 +215,33 @@
 
   /** 读题：题干文本 + 选项（A/B/C/D 或 radio/label/li） */
   function readQuiz(root) {
-    const out = { stem: "", options: [], submitNode: null, counter: "" };
-    const isSubmit = (el) => /^(提\s*交|提交答案|确认提交)/.test((el.textContent || "").trim());
+    const out = { stem: "", options: [], submitNode: null, continueNode: null, counter: "" };
+    // 实测类名（2026-11 采集）：li.ans-videoquiz-opt / #videoquiz-submit / a.ans-videoquiz-continue
+    try {
+      const realSubmit = root.querySelector("#videoquiz-submit, .ans-videoquiz-submit");
+      if (realSubmit && isShown(realSubmit)) out.submitNode = realSubmit;      out.continueNode = root.querySelector(".ans-videoquiz-continue") || null;
+      const realOpts = [...root.querySelectorAll("li.ans-videoquiz-opt, .ans-videoquiz-opt")];
+      if (realOpts.length) {
+        out.options = realOpts.slice(0, 10).map((li, i) => ({
+          node: li,
+          input: li.querySelector('input[type="radio"],input[type="checkbox"]'),
+          text: (li.textContent || "").trim().replace(/\s+/g, " "),
+          label: String.fromCharCode(65 + i),
+        }));
+        const all = (root.textContent || "").replace(/\s+/g, " ");
+        const mCnt = all.match(/共\s*\d+\s*题[，,]?\s*已答对\s*\d+\s*题/);
+        out.counter = mCnt ? mCnt[0] : "";
+        let stem = all;
+        for (const o of out.options) stem = stem.split(o.text).join(" ");
+        stem = stem
+          .replace(/共\s*\d+\s*题[，,]?\s*已答对\s*\d+\s*题/g, " ")
+          .replace(/(单选题|多选题|判断题)/g, " ")
+          .replace(/提\s*交|继续学习|恭喜你，答对了！|回答正确|回答错误/g, " ")
+          .replace(/\s+/g, " ").trim();
+        out.stem = stem.slice(0, 800);
+        return out;
+      }
+    } catch (_) {}    const isSubmit = (el) => /^(提\s*交|提交答案|确认提交)/.test((el.textContent || "").trim());
 
     // 提交按钮：取最内层、可见的那个
     const submits = [...root.querySelectorAll("a,button,div,span")]
@@ -294,12 +320,35 @@
     const root = findQuizRoot(doc);
     if (!root || quizHandled.has(root)) return false;
 
-    const quiz = readQuiz(root);
-    if (!quiz.options.length || !quiz.submitNode) return false;
+    const quiz = readQuiz(root);
 
+    const stemKey = (quiz.stem || "").replace(/\s+/g, "").slice(0, 60);
+    if (stemKey && quizDoneStems.has(stemKey)) {
+      // 同一道题已处理过：只把「继续学习」点掉，不重复提交
+      const cont0 = root.querySelector(".ans-videoquiz-continue") || quiz.continueNode;
+      if (cont0 && isShown(cont0)) {
+        try { cont0.click(); log("同一道题已处理过，已点「继续学习」"); } catch (_) {}
+      }
+      return false;
+    }
+    // 已经答完：提交按钮隐藏、出现「继续学习」→ 补点一下把播放放出来
+    if (!quiz.submitNode || !quiz.options.length) {
+      const cont = root.querySelector(".ans-videoquiz-continue") || quiz.continueNode;
+      if (cont) {
+        quizHandled.add(root);
+        try {
+          cont.click();
+          log("题目已答完，已点「继续学习」恢复播放");
+        } catch (e) {
+          log("点「继续学习」失败：" + e.message, "warn");
+        }
+        return true;
+      }
+      return false;
+    }
     quizHandled.add(root);
-    log("检测到视频内嵌题（" + (quiz.counter || "共?题") + "），开始作答");
-
+    if (stemKey) quizDoneStems.add(stemKey);
+    log("检测到视频内嵌题（" + (quiz.counter || "共?题") + "），开始作答");
     let picked = [];
     try {
       const cfg = await getModelConfigCached();
@@ -346,7 +395,20 @@
     } catch (e) {
       log("提交内嵌题失败：" + e.message, "warn");
     }
-    await new Promise((r) => setTimeout(r, 1200));
+    // 判分后出现「继续学习」，不点它视频不会继续
+    await new Promise((r) => setTimeout(r, 900));
+    let cont = null;
+    try { cont = root.querySelector(".ans-videoquiz-continue") || quiz.continueNode; } catch (_) {}
+    if (cont) {
+      try {
+        cont.removeAttribute("href");
+        cont.click();
+        log("已点「继续学习」恢复播放");
+      } catch (e) {
+        log("点「继续学习」失败：" + e.message, "warn");
+      }
+    }
+    await new Promise((r) => setTimeout(r, 800));
     return true;
   }
 
@@ -924,7 +986,24 @@
               muted: v.muted,
             }
           : null,
-        guardActive: !!window.__CX_VIDEO_GUARD__,
+        guardActive: (function () {
+          const MARK = "data-cx-video-guard";
+          const has = (doc, depth) => {
+            if (!doc || depth > 6) return false;
+            try {
+              if (doc.documentElement && doc.documentElement.getAttribute(MARK) === "1") return true;
+            } catch (_) {}
+            let frames = [];
+            try { frames = [...doc.querySelectorAll("iframe")]; } catch (_) { return false; }
+            for (const fr of frames) {
+              let d = null;
+              try { d = fr.contentDocument; } catch (_) {}
+              if (d && has(d, depth + 1)) return true;
+            }
+            return false;
+          };
+          return has(document, 0);
+        })(),
         logs: state.logs.slice(-30),
       };
     },

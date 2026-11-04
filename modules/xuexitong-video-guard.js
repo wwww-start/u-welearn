@@ -21,6 +21,8 @@
   // 防止重复注入（同一 frame 内 manifest 与手动注入可能叠加）
   if (window.__CX_VIDEO_GUARD__) return;
   window.__CX_VIDEO_GUARD__ = true;
+  // 跨 world 信号：隔离世界读不到 window 变量，只能靠 DOM 属性
+  try { document.documentElement.setAttribute("data-cx-video-guard", "1"); } catch (_) {}
 
   // 可由扩展在运行时关闭（写 localStorage 后刷新或通过 postMessage）
   var ENABLED = true;
