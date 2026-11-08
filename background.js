@@ -23,14 +23,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
   if (request.action === 'callAI') {
-    callAI(request.config, request.prompt, 'answer', request.imageDataUrl)
+    callAI(request.config, request.prompt, 'answer', request.imageDataUrl, request.maxTokens)
       .then(response => sendResponse({ success: true, data: response }))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
 
   if (request.action === 'analyzeHTML') {
-    callAI(request.config, request.prompt, 'analyze', request.imageDataUrl)
+    callAI(request.config, request.prompt, 'analyze', request.imageDataUrl, request.maxTokens)
       .then(response => sendResponse({ success: true, data: response }))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
@@ -120,7 +120,7 @@ async function getActiveModelConfig() {
   return FALLBACK_MODELS[activeId] || FALLBACK_MODELS['builtin-glm4flash'];
 }
 
-async function callAI(config, prompt, mode, imageDataUrl) {
+async function callAI(config, prompt, mode, imageDataUrl, maxTokens) {
   const { baseUrl, model } = config || {};
   const apiKey = String(config?.apiKey || '').trim().replace(/^Bearer\s+/i, '').trim();
   if (!apiKey || /\s/.test(apiKey)) throw new Error('API 密钥为空或包含空白，请在设置中重新粘贴完整密钥');
@@ -159,7 +159,7 @@ async function callAI(config, prompt, mode, imageDataUrl) {
       ],
       // deepseek-flash 是推理模型：推理 token 也计入 max_tokens。
       // 2000 会被推理吃光，content 返回空串（finish_reason=length）。
-      max_tokens: Math.max(512, Number(request.maxTokens) || 8192),
+      max_tokens: Math.max(512, Number(maxTokens) || 8192),
     }),
   });
 
