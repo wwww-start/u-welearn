@@ -222,6 +222,25 @@
       };
     }
     const norm = normalizeAnswer(ai.text, question);
+
+    // 选择题拿不到标签（模型回了矩阵/公式）→ 强制重问一次，只要字母
+    if (!norm.labels.length && question.options.length &&
+        (question.type === "single" || question.type === "multiple") &&
+        window.CXAI.askLettersOnly) {
+      try {
+        const retry = await window.CXAI.askLettersOnly(question, modelConfig, imageDataUrl);
+        if (retry && retry.ok) {
+          const norm2 = normalizeAnswer(retry.text, question);
+          if (norm2.labels.length) {
+            norm2.source = "model+retry";
+            norm2.rawAi = ai.text;
+            log("第 " + (question.index ?? question.seq + 1) + " 题答案非字母，已改用字母重问：" + retry.text);
+            return norm2;
+          }
+        }
+      } catch (_) {}
+    }
+
     norm.source = ai.via;
     norm.rawAi = ai.text;
     return norm;
@@ -327,6 +346,7 @@
     state.running = true;
     state.paused = false;
     state.results = [];
+    const failedList = [];
 
     const questions =
       (window.CXModel.extractQuestionsDeep || window.CXModel.extractQuestions)();
@@ -366,7 +386,10 @@
         );
       } else {
         state.stats.failed++;
-        log(`第 ${q.index ?? q.seq + 1} 题填充失败：${answer.reason || "无可用答案"}`, "error");
+        const reason = answer.reason ||
+          (answer.labels && answer.labels.length ? "选项未匹配到页面元素" : "未取得可用答案");
+        failedList.push({ index: q.index ?? q.seq + 1, type: q.type, reason });
+        log(`第 ${q.index ?? q.seq + 1} 题填充失败：${reason}`, "error");
       }
       await sleep(600);
     }
@@ -389,6 +412,15 @@
       log(hint, "warn");
     } else if (state.stats.total > 0 && state.stats.answered === 0 && state.stats.failed > 0) {
       hint = "全部作答失败，请查看上面每题的原因（取图失败 / API 报错 / 选项未匹配）。";
+    }
+
+    if (failedList.length) {
+      const brief = failedList.slice(0, 12)
+        .map((f) => "第" + f.index + "题(" + (f.type || "?") + ")：" + f.reason)
+        .join("；");
+      const line = "未填写 " + failedList.length + " 题 → " + brief +
+        (failedList.length > 12 ? " …" : "") + "。这些题一般是公式/矩阵类，建议手动补。";
+      hint = hint ? hint + " " + line : line;
     }
 
     return {

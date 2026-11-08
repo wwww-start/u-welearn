@@ -275,6 +275,34 @@
   }
 
   /**
+   * 选择题专用：模型有时把矩阵/公式当答案返回，这里强制只要字母。
+   */
+  async function askLettersOnly(question, modelConfig, imageDataUrl) {
+    const opts = (question.options || []).map((o) => o.label + ". " + (o.text || "")).join("\n");
+    const prompt = [
+      "这是一道选择题，请只输出正确选项的字母（多选连写，例如 AC）。",
+      "题干：" + ((question.stem && question.stem.text) || ""),
+      opts ? "选项：\n" + opts : "（选项见截图）"
+      ,
+      "",
+      "只输出字母，不要解释，不要公式，不要标点。",
+    ].join("\n");
+    const res = await new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { action: "callAI", config: modelConfig, prompt, imageDataUrl: imageDataUrl || null },
+        (r) => {
+          if (chrome.runtime.lastError) return resolve({ success: false, error: chrome.runtime.lastError.message });
+          resolve(r || { success: false, error: "no response" });
+        }
+      );
+    });
+    if (!res.success) return { ok: false, text: "", reason: res.error };
+    const raw = String(res.data || "").trim();
+    const m = raw.match(/[A-Za-z]{1,8}/);
+    if (!m) return { ok: false, text: raw.slice(0, 40), reason: "模型未给出字母" };
+    return { ok: true, text: m[0].toUpperCase(), via: "model+retry" };
+  }
+  /**
    * 解析模型回答。
    * 实测问题：模型有时返回被截断的 JSON（如 {"answer":"\(x-3y+z+2=0\)" 缺右括号），
    * 直接 JSON.parse 会失败，把原始 JSON 当答案填进输入框。
@@ -385,6 +413,7 @@
     buildSourceInfo,
     askByCoze,
     askByModel,
+    askLettersOnly,
     buildAnswerPrompt,
     parseModelAnswer,
   };
