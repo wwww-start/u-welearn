@@ -80,6 +80,25 @@
       return out;
     }
 
+    // 2.5) 判断题语义映射：AI 常答「对/错/√/×/正确/错误」，选项文本却是「正确/错误」或 T/F
+    if (question.options.length >= 2 && (question.type === "judge" || question.options.length === 2)) {
+      const YES = /^(对|正确|是|√|✓|true|t|yes|y)$/i;
+      const NO = /^(错|错误|否|×|✗|false|f|no|n)$/i;
+      const val = s.replace(/[。．.\s]/g, "");
+      const isYes = YES.test(val);
+      const isNo = NO.test(val);
+      if (isYes || isNo) {
+        const pick = question.options.find((o) => {
+          const t = (o.text || "").trim().replace(/[。．.\s]/g, "");
+          return isYes ? YES.test(t) : NO.test(t);
+        }) || question.options[isYes ? 0 : 1];
+        if (pick) {
+          out.labels = [pick.label];
+          return out;
+        }
+      }
+    }
+
     // 3) 与选项文本匹配
     if (question.options.length) {
       for (const opt of question.options) {
@@ -119,9 +138,23 @@
   function fillText(question, values) {
     const li = question.node;
     // 富文本 / 输入框
-    const inputs = [
+    let inputs = [
       ...li.querySelectorAll('textarea, input[type="text"], .ans-input, [contenteditable="true"]'),
     ];
+    // 填空/简答在考试页常用 UEditor：编辑区在 iframe 的 body[contenteditable] 里
+    if (!inputs.length) {
+      const inFrames = [];
+      try {
+        for (const fr of li.querySelectorAll("iframe")) {
+          let d = null;
+          try { d = fr.contentDocument; } catch (_) {}
+          if (!d) continue;
+          const body = d.querySelector('[contenteditable="true"], body');
+          if (body) inFrames.push(body);
+        }
+      } catch (_) {}
+      inputs = inFrames;
+    }
     if (!inputs.length) return false;
 
     let ok = 0;
