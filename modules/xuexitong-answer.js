@@ -113,6 +113,25 @@
     return out;
   }
 
+  /**
+   * 题干文本是否可用。
+   * 学习通的字体加密会渲染成"寙寑寗线"这类生僻字，特征是：
+   * 几乎不含常用汉字、或出现私有区字符。文本可信时就没必要截图。
+   */
+  function looksEncrypted(text) {
+    const t = String(text || "").trim();
+    if (t.length < 4) return true;
+    if (/[\uE000-\uF8FF]/.test(t)) return true;              // 私有区字符
+    if (/锟斤拷|ï¿½/.test(t)) return true;                     // 编码损坏
+    const cjk = (t.match(/[\u4e00-\u9fa5]/g) || []).length;
+    if (cjk === 0) return true;
+    // 字体加密的特征：整段几乎没有虚词/高频字（"的了在是和与不这可以对于"等），
+    // 而是随机生僻字映射。用高频字密度判断比"是否含某个字"稳得多。
+    const HOT = /[的是了在和与有不这个们上中下可以对于来到会能要就都而及其之者也把让从给为]/g;
+    const hot = (t.match(HOT) || []).length;
+    if (hot / cjk < 0.08) return true;
+    return false;
+  }
   /** 题干是否"公式/矩阵类"（图片公式 or 含数学符号）——这类题模型容易算错 */
   function isFormulaHeavy(question) {
     try {
@@ -211,9 +230,16 @@
       }
     }
 
-    // 3) 自带模型：公式题必须带整题截图（DeepSeek V4.1 Flash 已验证支持视觉）
+    // 3) 自带模型：**文本优先**。
+    //    以前是 hasFormulaImage || !hasCoze —— hasCoze 恒为 false，导致每题都截图，
+    //    而截图有水印、超长题还会被钳到视口内，模型看到的反而是最差的信息。
+    //    现在只在这些情况下带图：题干含公式图片，或题干文本被字体加密/为空。
     let imageDataUrl = null;
-    const needImage = hasFormulaImage || !hasCoze;
+    const stemTextBad = looksEncrypted(question.stem && question.stem.text);
+    // 选项文本缺失（矩阵/公式选项常是渲染图）也必须带图，否则模型看不到选项
+    const optionsTextMissing = question.options.length > 0 &&
+      question.options.some((o) => String((o && o.text) || "").trim().length < 2);
+    const needImage = hasFormulaImage || stemTextBad || optionsTextMissing;
     if (needImage) {
       try {
         const img = await window.CXAI.grabQuestionImage(question, { preferScreenshot: true });

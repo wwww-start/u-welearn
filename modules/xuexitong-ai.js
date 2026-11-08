@@ -225,11 +225,12 @@
     }
     if (hasImage) {
       lines.push("");
-      lines.push("【重要】题目中包含数学公式，已随消息附带题目截图。");
-      lines.push("请以截图中的完整题目为准作答，不要依赖上面可能残缺的文字。");
-    } else if (question.stem.images.length) {
+      lines.push("【说明】上面的文字是题目原文，**以文字为主要依据**。");
+      lines.push("随消息附带的截图只用于核对文字里缺失的公式/图形（截图可能带水印或被截断，不要以它为准）。");
+      lines.push("两者冲突时，优先相信与选项文字自洽的那个结论。");
+    } else if (question.stem.images && question.stem.images.length) {
       lines.push("");
-      lines.push("【注意】题干中的公式无法转成文字，请根据选项与上下文推断最可能的答案；不确定时给出置信度。");
+      lines.push("【注意】题干中的公式是图片、未能转成文字，请结合选项文字与上下文推断。");
     }
     lines.push("");
     lines.push('只返回 JSON，不要解释。格式：{"answer":"<答案>","confidence":<0-1>}');
