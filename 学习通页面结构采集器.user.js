@@ -391,11 +391,11 @@
     'max-width:320px', 'opacity:.85',
   ].join(';');
   panel.innerHTML =
-    '<div data-dot style="cursor:pointer;font-weight:600">⦿ 结构采集</div>' +
+    '<div data-dot style="cursor:pointer;font-weight:600">⦿ 结构采集 v1.1.0</div>' +
     '<div data-body style="display:none;margin-top:6px">' +
       '<button data-cap>采集并下载</button> ' +
       '<button data-copy>复制摘要</button>' +
-      '<div data-status style="margin-top:5px;color:#555;overflow-wrap:anywhere">只读采集，不点击页面。</div>' +
+      '<div data-status style="margin-top:5px;color:#555;overflow-wrap:anywhere">只读采集，不点击页面（v1.1.0 起递归同域 iframe）。</div>' +
       '<div style="margin-top:4px;color:#999">Alt+H 隐藏/显示</div>' +
     '</div>';
   const mount = () => { try { document.body.appendChild(panel); } catch (_) { setTimeout(mount, 500); } };
