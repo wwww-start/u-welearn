@@ -488,6 +488,7 @@ async function routeCXAnswer(tab) {
     } else {
       const stats = result.data?.stats || {};
       applyCXStats(stats, scan.data.count);
+      if (result.data && result.data.hint) addLog('warning', '  ' + result.data.hint);
       addLog('info', '学习通：已填写 ' + (stats.answered || 0) + '，失败 ' + (stats.failed || 0) + '。请核对页面结果。');
     }
   } catch (error) {
@@ -857,6 +858,8 @@ async function initCXPanel() {
       } else {
         addLog("info", "学习通答题完成：已答 " + (s.answered || 0) + "，失败 " + (s.failed || 0));
         applyCXStats(s, 0);
+
+        if (r.data && r.data.hint) addLog("warning", "  " + r.data.hint);
       }
       const logs = r.data?.logs || [];
       logs.slice(-6).forEach((l) => addLog(l.level === "error" ? "error" : "info", "  " + l.msg));

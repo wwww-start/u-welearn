@@ -23,7 +23,7 @@
     paused: false,
     results: [],
     logs: [],
-    stats: { total: 0, answered: 0, submitted: 0, failed: 0 },
+    stats: { total: 0, answered: 0, submitted: 0, failed: 0, alreadyAnswered: 0 },
   };
 
   function log(msg, level) {
@@ -339,6 +339,7 @@
         break;
       }
       if (q.answers.mine) {
+        state.stats.alreadyAnswered++;
         log(`第 ${q.index ?? q.seq + 1} 题已有作答，跳过`);
         continue;
       }
@@ -379,11 +380,23 @@
     }
 
     state.running = false;
+
+    // 全题都已有作答：不是识别失败，而是刻意不覆盖
+    let hint = null;
+    if (state.stats.total > 0 && state.stats.answered === 0 && state.stats.alreadyAnswered >= state.stats.total) {
+      hint = "本页 " + state.stats.total + " 道题都已有作答记录，已全部跳过（不覆盖你的答案）。" +
+        "如果要重答，请先在页面上清空作答，或走重考流程后再点「答题」。";
+      log(hint, "warn");
+    } else if (state.stats.total > 0 && state.stats.answered === 0 && state.stats.failed > 0) {
+      hint = "全部作答失败，请查看上面每题的原因（取图失败 / API 报错 / 选项未匹配）。";
+    }
+
     return {
       ok: true,
       stats: { ...state.stats },
       results: state.results,
       submitResult,
+      hint,
       logs: state.logs.slice(-50),
     };
   }
