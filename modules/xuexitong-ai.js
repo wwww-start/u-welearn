@@ -247,17 +247,25 @@
    * 用扩展配置的模型答题。
    * @param {string} [imageDataUrl] 题目截图 dataURL；有值时走多模态（DeepSeek V4.1 Flash 已验证支持）
    */
-  async function askByModel(question, modelConfig, imageDataUrl) {
+  async function askByModel(question, modelConfig, imageDataUrl, opts) {
     const prompt = buildAnswerPrompt(question, !!imageDataUrl);
-    const res = await new Promise((resolve) => {
+
+    const callOnce = (maxTokens) => new Promise((resolve) => {
       chrome.runtime.sendMessage(
-        { action: "callAI", config: modelConfig, prompt, imageDataUrl: imageDataUrl || null },
+        { action: "callAI", config: modelConfig, prompt, imageDataUrl: imageDataUrl || null, maxTokens },
         (r) => {
           if (chrome.runtime.lastError) return resolve({ success: false, error: chrome.runtime.lastError.message });
           resolve(r || { success: false, error: "no response" });
         }
       );
     });
+
+    const baseTokens = (opts && opts.maxTokens) || 8192;
+    let res = await callOnce(baseTokens);
+    // 推理把预算吃光 → 放大一倍再试一次
+    if (!res.success && /EMPTY_CONTENT|空内容|max_tokens|截断/i.test(String(res.error || ""))) {
+      res = await callOnce(baseTokens * 2);
+    }
     if (!res.success) return { ok: false, text: "", via: "model", reason: res.error };
     const raw = String(res.data || "");
     // deepseek-flash 是推理模型：推理 token 也计入 max_tokens，

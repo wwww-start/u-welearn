@@ -157,8 +157,9 @@ async function callAI(config, prompt, mode, imageDataUrl) {
         { role: 'system', content: systemPrompts[mode] || systemPrompts.answer },
         { role: 'user', content: userContent },
       ],
-      // 不设上限时默认值会把长答案截断，导致 JSON 不完整、解析失败
-      max_tokens: 2000,
+      // deepseek-flash 是推理模型：推理 token 也计入 max_tokens。
+      // 2000 会被推理吃光，content 返回空串（finish_reason=length）。
+      max_tokens: Math.max(512, Number(request.maxTokens) || 8192),
     }),
   });
 
@@ -173,7 +174,16 @@ async function callAI(config, prompt, mode, imageDataUrl) {
     throw new Error('API返回格式错误');
   }
 
-  return data.choices[0].message.content;
+  const choice = data.choices[0];
+  const content = choice.message.content;
+  if (content == null || !String(content).trim()) {
+    const finish = choice.finish_reason || '?';
+    throw new Error(
+      'EMPTY_CONTENT finish_reason=' + finish +
+      (finish === 'length' ? '（推理 token 占满 max_tokens，需放大预算重试）' : '（模型可能不支持该输入）')
+    );
+  }
+  return content;
 }
 
 async function fetchUnipusAPI(url, options) {

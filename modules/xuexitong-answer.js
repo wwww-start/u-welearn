@@ -346,6 +346,8 @@
     state.running = true;
     state.paused = false;
     state.results = [];
+    // 每次运行必须重置：否则 answered/failed 会跨次累积，统计与提示对不上
+    state.stats = { total: 0, answered: 0, submitted: 0, failed: 0, alreadyAnswered: 0 };
     const failedList = [];
 
     const questions =
