@@ -857,8 +857,9 @@
    * 学习页/考试整卷页的容器 class 里也带 TiMu（FullfanyaMarking TiMu），只看 class 会误判。
    */
   function isLegacyPage() {
-    const MARK = ".Zy_TItle, .newZy_TItle, li[qid]";
-    const docs = [];
+    // 顶层已有新版题目就不算旧版（考试/新版作业都是 .questionLi）
+    try { if (document.querySelector(".questionLi")) return false; } catch (_) {}
+    const MARK = ".Zy_TItle, .newZy_TItle, li[qid]";    const docs = [];
     try { docs.push(document); } catch (_) {}
     for (const fr of collectFrames()) {
       let d = null;

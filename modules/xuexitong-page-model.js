@@ -159,7 +159,12 @@
         return {
           index: i,
           // 以显示编号为准（用户与 AI 看到的是这个）
-          label: (displayLabel || String.fromCharCode(65 + i)).toUpperCase(),
+          label: (function () {
+            let L = String(displayLabel || "").replace(/[^A-Za-z]/g, "").toUpperCase();
+            if (!L) L = String(originalLabel || "").replace(/[^A-Za-z]/g, "").toUpperCase();
+            if (!L) L = String.fromCharCode(65 + i);
+            return L;
+          })(),
           originalLabel: String(originalLabel).toUpperCase(),
           text: clean(textEl ? textEl.textContent : ""),
           raw: clean(n.textContent),

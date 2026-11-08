@@ -115,8 +115,9 @@
    * 因此必须要求「带 TiMu 的元素内部真的有旧版题目特征」。
    */
   function isLegacy() {
-    const LEGACY_MARK = ".Zy_TItle, .newZy_TItle, li[qid]";
-    let nodes = [];
+    // 新版结构（考试整卷、新版作业）都带 .questionLi；有它就绝不走旧版分支
+    try { if (document.querySelector(".questionLi")) return false; } catch (_) {}
+    const LEGACY_MARK = ".Zy_TItle, .newZy_TItle, li[qid]";    let nodes = [];
     try {
       nodes = [...document.querySelectorAll(".TiMu")];
     } catch (_) {}
@@ -263,7 +264,19 @@
     // ---- 扫描 ----
     if (req.action === "cxScan") {
       const qs = collectQuestions();
-      const legacy = isLegacy();
+            if (!qs.length) {
+              sendResponse({
+                success: true,
+                data: {
+                  stats: { total: 0, answered: 0, failed: 0, skipped: 0 },
+                  hint: "本页识别到 0 道题：pageType=" + pageType + "，legacy=" + isLegacy() +
+                    "，.questionLi=" + document.querySelectorAll(".questionLi").length +
+                    "，.TiMu=" + document.querySelectorAll(".TiMu").length +
+                    "。请点面板「结构自检」后反馈。",
+                },
+              });
+              return;
+            }      const legacy = isLegacy();
       sendResponse({
         success: true,
         data: {
