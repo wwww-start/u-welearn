@@ -113,6 +113,17 @@
     return out;
   }
 
+  /** 题干是否"公式/矩阵类"（图片公式 or 含数学符号）——这类题模型容易算错 */
+  function isFormulaHeavy(question) {
+    try {
+      if (question.stem && question.stem.images && question.stem.images.length) return true;
+      const t = String((question.stem && question.stem.text) || "");
+      return /[√∫∑∏πλθ≤≥≠∞]|\frac|\sqrt|\begin|[xyz]s*^|ds*[+-]s*ds*[xyz]|矩阵|二次型|行列式|特征值|正交/.test(t);
+    } catch (_) {
+      return false;
+    }
+  }
+
   /* ---------------- 填充 ---------------- */
 
   function clickOption(question, label) {
@@ -241,7 +252,29 @@
       } catch (_) {}
     }
 
-    norm.source = ai.via;
+    // 公式/矩阵类选择题：模型易算错，用另一种问法再算一次比对
+    if (norm.labels.length && question.options.length && isFormulaHeavy(question) &&
+        window.CXAI.askLettersOnly && (opts.verifyFormula !== false)) {
+      try {
+        const second = await window.CXAI.askLettersOnly(question, modelConfig, imageDataUrl);
+        if (second && second.ok) {
+          const norm2 = normalizeAnswer(second.text, question);
+          const a = norm.labels.join("");
+          const b = (norm2.labels || []).join("");
+          const idx = question.index ?? question.seq + 1;
+          if (b && a !== b) {
+            log("第 " + idx + " 题两次作答不一致（" + a + " vs " + b + "），已采用第一次，请务必核对", "warn");
+            norm.disagree = a + "|" + b;
+            norm.source = (ai.via || "model") + "+复核不一致";
+          } else if (b) {
+            log("第 " + idx + " 题双采样一致：" + a);
+            norm.source = (ai.via || "model") + "+双采样一致";
+          }
+        }
+      } catch (_) {}
+    }
+
+    norm.source = norm.source || ai.via;
     norm.rawAi = ai.text;
     return norm;
   }
@@ -349,6 +382,7 @@
     // 每次运行必须重置：否则 answered/failed 会跨次累积，统计与提示对不上
     state.stats = { total: 0, answered: 0, submitted: 0, failed: 0, alreadyAnswered: 0 };
     const failedList = [];
+    const disagreeList = [];
 
     const questions =
       (window.CXModel.extractQuestionsDeep || window.CXModel.extractQuestions)();
@@ -382,6 +416,10 @@
 
       if (applied) {
         state.stats.answered++;
+        if (answer.disagree && answer.disagree.indexOf("|") > 0) {
+          const pair = answer.disagree.split("|");
+          disagreeList.push({ index: q.index ?? q.seq + 1, first: pair[0], second: pair[1] });
+        }
         log(
           `第 ${q.index ?? q.seq + 1} 题 [${q.type}] ← ${answer.source}: ` +
             (answer.labels.join(",") || answer.texts.join(" / ") || "-")
@@ -414,6 +452,14 @@
       log(hint, "warn");
     } else if (state.stats.total > 0 && state.stats.answered === 0 && state.stats.failed > 0) {
       hint = "全部作答失败，请查看上面每题的原因（取图失败 / API 报错 / 选项未匹配）。";
+    }
+
+    if (disagreeList.length) {
+      const brief = disagreeList.slice(0, 12)
+        .map((d) => "第" + d.index + "题(" + d.first + " 与 " + d.second + " 不一致)")
+        .join("；");
+      const line = "需人工核对 " + disagreeList.length + " 题 → " + brief + "。";
+      hint = hint ? hint + " " + line : line;
     }
 
     if (failedList.length) {
