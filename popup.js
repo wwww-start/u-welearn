@@ -487,11 +487,7 @@ async function routeCXAnswer(tab) {
       addLog('error', '学习通：' + (result?.error || '页面连接中断，请刷新后重试'));
     } else {
       const stats = result.data?.stats || {};
-      questionCount.textContent = stats.total ?? scan.data.count;
-      answeredCount.textContent = stats.answered ?? 0;
-      questionCount.parentElement.querySelector('.stat-label').textContent = '识别题目';
-      answeredCount.parentElement.querySelector('.stat-label').textContent = '已填写题目';
-      document.getElementById('submittedSummary').textContent = '学习通：待核对，未自动提交';
+      applyCXStats(stats, scan.data.count);
       addLog('info', '学习通：已填写 ' + (stats.answered || 0) + '，失败 ' + (stats.failed || 0) + '。请核对页面结果。');
     }
   } catch (error) {
@@ -676,6 +672,29 @@ chrome.runtime.onMessage.addListener((message) => {
 
 let cxTabId = null;
 
+/**
+ * 学习通面板的顶部统计：题数 / 已填写 / 提交状态
+ * U校园那套 label 是「题组·N 个空位」，学习通场景要换成「识别题目 / 已填写」。
+ */
+function applyCXStats(stats, fallbackTotal) {
+  const total = Number(stats && stats.total ? stats.total : (fallbackTotal || 0));
+  const filled = Number((stats && stats.answered) || 0);
+  try {
+    questionCount.textContent = total;
+    answeredCount.textContent = filled;
+    const ql = questionCount.parentElement.querySelector(".stat-label");
+    const al = answeredCount.parentElement.querySelector(".stat-label");
+    if (ql) ql.textContent = "识别题目";
+    if (al) al.textContent = "已填写题目";
+    const sub = document.getElementById("submittedSummary");
+    if (sub) {
+      sub.textContent = (stats && stats.submitted)
+        ? "学习通：已提交 " + stats.submitted + " 组"
+        : "学习通：待核对，未自动提交";
+    }
+  } catch (_) {}
+}
+
 function cxSend(action, extra) {
   return new Promise((resolve) => {
     if (cxTabId == null) return resolve(null);
@@ -833,9 +852,11 @@ async function initCXPanel() {
     if (r?.success) {
       const s = r.data?.stats || {};
       if (!s.total) {
-        addLog("warning", "学习通：本页识别到 0 道题 —— 检查是否在作答页（预览/回顾页不能作答）");
+        addLog("warning", "学习通：本页识别到 0 道题 —— 检查是否在作答页（预览/回顾页不能作答）");
+        if (r.data && r.data.hint) addLog("warning", "  " + r.data.hint);
       } else {
-        addLog("info", "学习通答题完成：已答 " + (s.answered || 0) + "，失败 " + (s.failed || 0));
+        addLog("info", "学习通答题完成：已答 " + (s.answered || 0) + "，失败 " + (s.failed || 0));
+        applyCXStats(s, 0);
       }
       const logs = r.data?.logs || [];
       logs.slice(-6).forEach((l) => addLog(l.level === "error" ? "error" : "info", "  " + l.msg));
